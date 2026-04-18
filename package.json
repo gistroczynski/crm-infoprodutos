@@ -1,0 +1,16 @@
+{
+  "name": "crm-infoprodutos",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev": "npm run dev:api & npm run dev:web",
+    "build": "npm run build --workspaces --if-present",
+    "install:all": "npm install"
+  }
+}

@@ -1,8 +1,0 @@
-[phases.build]
-cmds = [
-  "npm install",
-  "cd apps/api && npx tsc"
-]
-
-[start]
-cmd = "node apps/api/dist/index.js"

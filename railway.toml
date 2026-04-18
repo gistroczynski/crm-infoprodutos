@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm install && npm run build --workspace=apps/api"
+buildCommand = "npm install --prefer-offline && cd apps/api && npm run build"
 
 [deploy]
 startCommand = "node apps/api/dist/index.js"

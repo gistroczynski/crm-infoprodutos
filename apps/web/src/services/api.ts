@@ -181,6 +181,8 @@ export interface PreviewCsv {
   colunas_detectadas: { email: string | null; telefone: string | null }
   preview: Record<string, string>[]
   cabecalhos: string[]
+  encoding_detectado?: string
+  separador_detectado?: string
 }
 
 export interface ResultadoImportacao {

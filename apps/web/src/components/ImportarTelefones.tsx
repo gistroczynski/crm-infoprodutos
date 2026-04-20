@@ -25,8 +25,13 @@ export default function ImportarTelefones() {
 
   // ── Selecionar arquivo ─────────────────────────────────────────────────
   async function processarArquivo(file: File) {
-    if (!file.name.endsWith('.csv')) {
-      setErro('Apenas arquivos .csv são aceitos.')
+    const extensaoOk = file.name.endsWith('.csv') || file.name.endsWith('.xlsx')
+    if (!extensaoOk) {
+      setErro('Apenas arquivos .csv ou .xlsx são aceitos.')
+      return
+    }
+    if (file.name.endsWith('.xlsx')) {
+      setErro('Arquivos .xlsx detectados: converta para .csv antes de importar. No Excel: Arquivo → Salvar como → CSV UTF-8.')
       return
     }
     setErro(null)
@@ -36,8 +41,15 @@ export default function ImportarTelefones() {
     try {
       const data = await importarCsvApi.preview(file)
       setPreview(data)
-    } catch (e) {
-      setErro('Erro ao ler o arquivo. Verifique se é um CSV válido.')
+    } catch (e: any) {
+      const resp = e?.response?.data
+      let msg = 'Erro ao ler o arquivo.'
+      if (resp?.error)              msg += ` ${resp.error}`
+      if (resp?.dica)               msg += ` ${resp.dica}`
+      if (resp?.colunas_encontradas?.length) {
+        msg += ` Colunas encontradas: ${(resp.colunas_encontradas as string[]).join(', ')}.`
+      }
+      setErro(msg)
       setEtapa('idle')
     }
   }
@@ -107,7 +119,7 @@ export default function ImportarTelefones() {
       <input
         ref={inputRef}
         type="file"
-        accept=".csv"
+        accept=".csv,.xlsx"
         className="hidden"
         onChange={onInputChange}
       />
@@ -151,6 +163,12 @@ export default function ImportarTelefones() {
               </p>
               <p className="text-xs text-gray-500 mt-0.5">
                 {preview.total_linhas} linhas detectadas
+                {preview.encoding_detectado && (
+                  <span className="ml-2 text-gray-400">
+                    · {preview.encoding_detectado}
+                    {preview.separador_detectado && ` · sep: "${preview.separador_detectado}"`}
+                  </span>
+                )}
               </p>
             </div>
             <button onClick={reiniciar} className="text-xs text-gray-400 hover:text-gray-600">

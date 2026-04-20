@@ -7,34 +7,43 @@ import { formatarTelefone } from '../services/hotmart'
 
 export const importarCsvRouter = Router()
 
-// ── Multer: memória (sem salvar em disco) ──────────────────────────────────
+// ── Multer: memória ────────────────────────────────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits:  { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
-      cb(null, true)
-    } else {
-      cb(new Error('Apenas arquivos CSV são aceitos'))
-    }
+    const ok = file.mimetype === 'text/csv'
+      || file.originalname.endsWith('.csv')
+      || file.originalname.endsWith('.xlsx')
+    ok ? cb(null, true) : cb(new Error('Apenas arquivos .csv ou .xlsx são aceitos'))
   },
 })
 
 // ── Normalização de cabeçalhos ─────────────────────────────────────────────
-//    Remove acentos, lowercase, trim
+
 function normalizar(str: string): string {
   return str
     .toLowerCase()
     .trim()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')  // remove diacríticos
-    .replace(/[^a-z0-9 ]/g, ' ')     // substitui especiais por espaço
+    .replace(/[^a-z0-9 ]/g, ' ')     // substitui especiais (-, _, etc.) por espaço
     .replace(/\s+/g, ' ')
     .trim()
 }
 
-const MAPA_EMAIL     = new Set(['email', 'e mail', 'e mail do comprador', 'email do comprador'])
-const MAPA_TELEFONE  = new Set(['telefone', 'phone', 'celular', 'telefone do comprador', 'numero', 'numero de telefone'])
+const MAPA_EMAIL = new Set([
+  'email', 'e mail', 'e mail do comprador', 'email do comprador',
+  'buyer email', 'comprador email',
+])
+
+const MAPA_TELEFONE = new Set([
+  'telefone', 'phone', 'celular',
+  'telefone do comprador', 'telefone do cliente',
+  'buyer phone', 'comprador telefone',
+  'whatsapp', 'numero', 'numero de telefone',
+  'tel', 'fone',
+])
 
 function detectarColunas(cabecalhos: string[]): { emailCol: string | null; telefoneCol: string | null } {
   let emailCol:    string | null = null
@@ -49,21 +58,65 @@ function detectarColunas(cabecalhos: string[]): { emailCol: string | null; telef
   return { emailCol, telefoneCol }
 }
 
-// ── Parseia CSV do buffer ──────────────────────────────────────────────────
-async function parsearCsv(buffer: Buffer): Promise<Record<string, string>[]> {
+// ── Detecção de encoding ───────────────────────────────────────────────────
+
+function decodificarBuffer(buf: Buffer): { texto: string; encoding: string } {
+  // UTF-8 BOM (EF BB BF)
+  if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+    return { texto: buf.toString('utf8').replace(/^\uFEFF/, ''), encoding: 'UTF-8 BOM' }
+  }
+
+  // Tenta UTF-8: se não houver caractere de substituição, é UTF-8 válido
+  const utf8 = buf.toString('utf8')
+  if (!utf8.includes('\uFFFD')) {
+    return { texto: utf8.replace(/^\uFEFF/, ''), encoding: 'UTF-8' }
+  }
+
+  // Fallback: Latin-1 / ISO-8859-1 (Node.js suporta nativamente via 'latin1')
+  return { texto: buf.toString('latin1'), encoding: 'Latin-1' }
+}
+
+// ── Detecção de separador ──────────────────────────────────────────────────
+
+function detectarSeparador(primeiraLinha: string): ',' | ';' {
+  const nPontoVirgula = (primeiraLinha.match(/;/g) ?? []).length
+  const nVirgula      = (primeiraLinha.match(/,/g) ?? []).length
+  return nPontoVirgula >= nVirgula ? ';' : ','
+}
+
+// ── Parse principal ────────────────────────────────────────────────────────
+
+interface CsvParseResult {
+  registros:  Record<string, string>[]
+  encoding:   string
+  separador:  ',' | ';'
+}
+
+async function parsearCsv(buffer: Buffer): Promise<CsvParseResult> {
+  const { texto, encoding } = decodificarBuffer(buffer)
+  const primeiraLinha = texto.split(/\r?\n/)[0] ?? ''
+  const separador     = detectarSeparador(primeiraLinha)
+
   return new Promise((resolve, reject) => {
     const registros: Record<string, string>[] = []
-    const stream = Readable.from(buffer)
+    const stream = Readable.from([Buffer.from(texto, 'utf8')])
 
     stream
-      .pipe(parse({ columns: true, skip_empty_lines: true, trim: true, bom: true }))
-      .on('data', (row: Record<string, string>) => registros.push(row))
-      .on('end',  () => resolve(registros))
-      .on('error', reject)
+      .pipe(parse({
+        columns:           true,
+        skip_empty_lines:  true,
+        trim:              true,
+        delimiter:         separador,
+        relax_column_count: true,
+      }))
+      .on('data',  row   => registros.push(row as Record<string, string>))
+      .on('end',   ()    => resolve({ registros, encoding, separador }))
+      .on('error', err   => reject(err))
   })
 }
 
-// ── GET /api/clientes/importar-csv/template ────────────────────────────────
+// ── GET /template ──────────────────────────────────────────────────────────
+
 importarCsvRouter.get('/template', (_req: Request, res: Response) => {
   const csv = [
     'email,telefone',
@@ -73,67 +126,91 @@ importarCsvRouter.get('/template', (_req: Request, res: Response) => {
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8')
   res.setHeader('Content-Disposition', 'attachment; filename="modelo-telefones.csv"')
-  res.send('\uFEFF' + csv) // BOM para Excel reconhecer UTF-8
+  res.send('\uFEFF' + csv)
 })
 
-// ── POST /api/clientes/importar-csv ───────────────────────────────────────
-importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: Response) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'Nenhum arquivo enviado. Use o campo "arquivo".' })
-  }
+// ── POST /preview ──────────────────────────────────────────────────────────
+
+importarCsvRouter.post('/preview', upload.single('arquivo'), async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' })
 
   try {
-    const registros = await parsearCsv(req.file.buffer)
+    const { registros, encoding, separador } = await parsearCsv(req.file.buffer)
+    const cabecalhos = Object.keys(registros[0] ?? {})
+    const { emailCol, telefoneCol } = detectarColunas(cabecalhos)
+
+    console.log(`[ImportarCSV/preview] encoding=${encoding} sep="${separador}" colunas=${JSON.stringify(cabecalhos)}`)
+    console.log(`[ImportarCSV/preview] primeiras 3 linhas:`, JSON.stringify(registros.slice(0, 3), null, 2))
+
+    res.json({
+      total_linhas:       registros.length,
+      encoding_detectado: encoding,
+      separador_detectado: separador,
+      colunas_detectadas: { email: emailCol, telefone: telefoneCol },
+      preview:            registros.slice(0, 5),
+      cabecalhos,
+    })
+  } catch (err) {
+    console.error('[ImportarCSV/preview] Erro ao parsear:', err)
+    res.status(500).json({
+      error: `Erro ao parsear o arquivo: ${String(err)}`,
+      dica:  'Verifique se o arquivo é um CSV válido exportado da Hotmart.',
+    })
+  }
+})
+
+// ── POST / (importar) ──────────────────────────────────────────────────────
+
+importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado. Use o campo "arquivo".' })
+
+  try {
+    const { registros, encoding, separador } = await parsearCsv(req.file.buffer)
 
     if (registros.length === 0) {
       return res.status(400).json({ error: 'CSV vazio ou sem linhas de dados.' })
     }
 
-    // Detecta colunas automaticamente
     const cabecalhos = Object.keys(registros[0])
     const { emailCol, telefoneCol } = detectarColunas(cabecalhos)
 
+    console.log(`[ImportarCSV] encoding=${encoding} sep="${separador}" colunas=${JSON.stringify(cabecalhos)}`)
+    console.log(`[ImportarCSV] primeiras 3 linhas:`, JSON.stringify(registros.slice(0, 3), null, 2))
+
     if (!emailCol) {
       return res.status(400).json({
-        error: `Coluna de email não encontrada. Colunas detectadas: ${cabecalhos.join(', ')}`,
-        dica: 'Use: email, e-mail, "E-mail do Comprador"',
+        error:              `Coluna de email não encontrada.`,
+        colunas_encontradas: cabecalhos,
+        dica:               'Esperado: "email", "E-mail do Comprador", "buyer_email"',
       })
     }
     if (!telefoneCol) {
       return res.status(400).json({
-        error: `Coluna de telefone não encontrada. Colunas detectadas: ${cabecalhos.join(', ')}`,
-        dica: 'Use: telefone, phone, celular, "Telefone do Comprador"',
+        error:              `Coluna de telefone não encontrada.`,
+        colunas_encontradas: cabecalhos,
+        dica:               'Esperado: "telefone", "Telefone do Comprador", "phone", "whatsapp"',
       })
     }
 
     const resultado = {
-      atualizados:     0,
-      nao_encontrados: [] as string[],
-      erros:           [] as string[],
+      atualizados:      0,
+      nao_encontrados:  [] as string[],
+      erros:            [] as string[],
     }
 
     for (const linha of registros) {
-      const email    = linha[emailCol]?.trim().toLowerCase()
-      const telRaw   = linha[telefoneCol]?.trim()
+      const email  = linha[emailCol]?.trim().toLowerCase()
+      const telRaw = linha[telefoneCol]?.trim()
 
       if (!email) continue
-
-      if (!telRaw) {
-        resultado.erros.push(`${email}: telefone vazio`)
-        continue
-      }
+      if (!telRaw) { resultado.erros.push(`${email}: telefone vazio`); continue }
 
       try {
-        // Verifica se cliente existe pelo email
         const cliente = await queryOne<{ id: string }>(
-          'SELECT id FROM clientes WHERE LOWER(email) = $1',
-          [email]
+          'SELECT id FROM clientes WHERE LOWER(email) = $1', [email]
         )
 
-        if (!cliente) {
-          resultado.nao_encontrados.push(email)
-          continue
-        }
+        if (!cliente) { resultado.nao_encontrados.push(email); continue }
 
         const { formatado, valido } = formatarTelefone(telRaw)
 
@@ -153,40 +230,40 @@ importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: 
     }
 
     console.log(
-      `[ImportarCSV] Processados: ${registros.length} linhas` +
+      `[ImportarCSV] Processados: ${registros.length}` +
       ` | atualizados: ${resultado.atualizados}` +
       ` | não encontrados: ${resultado.nao_encontrados.length}` +
       ` | erros: ${resultado.erros.length}`
     )
 
-    res.json({
-      success: true,
-      total_linhas: registros.length,
-      ...resultado,
-    })
+    res.json({ success: true, total_linhas: registros.length, ...resultado })
   } catch (err) {
     console.error('[ImportarCSV] Erro:', err)
-    res.status(500).json({ error: String(err) })
+    res.status(500).json({
+      error: `Erro ao processar arquivo: ${String(err)}`,
+      dica:  'Verifique se o arquivo é um CSV válido exportado da Hotmart.',
+    })
   }
 })
 
-// ── POST /api/clientes/importar-csv/preview ───────────────────────────────
-// Retorna as primeiras 5 linhas sem importar (para preview no frontend)
-importarCsvRouter.post('/preview', upload.single('arquivo'), async (req: Request, res: Response) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'Nenhum arquivo enviado.' })
-  }
+// ── POST /debug-colunas ────────────────────────────────────────────────────
+// Diagnostica o CSV sem importar — útil para identificar problemas de encoding/separador
+
+importarCsvRouter.post('/debug-colunas', upload.single('arquivo'), async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' })
 
   try {
-    const registros = await parsearCsv(req.file.buffer)
+    const { registros, encoding, separador } = await parsearCsv(req.file.buffer)
     const cabecalhos = Object.keys(registros[0] ?? {})
     const { emailCol, telefoneCol } = detectarColunas(cabecalhos)
 
     res.json({
-      total_linhas: registros.length,
-      colunas_detectadas: { email: emailCol, telefone: telefoneCol },
-      preview: registros.slice(0, 5),
-      cabecalhos,
+      encoding_detectado:   encoding,
+      separador_detectado:  separador,
+      colunas_encontradas:  cabecalhos,
+      primeiras_3_linhas:   registros.slice(0, 3),
+      email_coluna:         emailCol,
+      telefone_coluna:      telefoneCol,
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })

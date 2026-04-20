@@ -10,7 +10,7 @@ export const importarCsvRouter = Router()
 // ── Multer: memória ────────────────────────────────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
   fileFilter: (_req, file, cb) => {
     const ok = file.mimetype === 'text/csv'
       || file.originalname.endsWith('.csv')
@@ -92,7 +92,7 @@ interface CsvParseResult {
   separador:  ',' | ';'
 }
 
-async function parsearCsv(buffer: Buffer): Promise<CsvParseResult> {
+async function parsearCsv(buffer: Buffer, maxLinhas?: number): Promise<CsvParseResult> {
   const { texto, encoding } = decodificarBuffer(buffer)
   const primeiraLinha = texto.split(/\r?\n/)[0] ?? ''
   const separador     = detectarSeparador(primeiraLinha)
@@ -101,17 +101,20 @@ async function parsearCsv(buffer: Buffer): Promise<CsvParseResult> {
     const registros: Record<string, string>[] = []
     const stream = Readable.from([Buffer.from(texto, 'utf8')])
 
+    const parser = parse({
+      columns:            true,
+      skip_empty_lines:   true,
+      trim:               true,
+      delimiter:          separador,
+      relax_column_count: true,
+      ...(maxLinhas ? { to: maxLinhas } : {}),
+    })
+
     stream
-      .pipe(parse({
-        columns:           true,
-        skip_empty_lines:  true,
-        trim:              true,
-        delimiter:         separador,
-        relax_column_count: true,
-      }))
-      .on('data',  row   => registros.push(row as Record<string, string>))
-      .on('end',   ()    => resolve({ registros, encoding, separador }))
-      .on('error', err   => reject(err))
+      .pipe(parser)
+      .on('data',  row => registros.push(row as Record<string, string>))
+      .on('end',   ()  => resolve({ registros, encoding, separador }))
+      .on('error', err => reject(err))
   })
 }
 
@@ -135,7 +138,8 @@ importarCsvRouter.post('/preview', upload.single('arquivo'), async (req: Request
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' })
 
   try {
-    const { registros, encoding, separador } = await parsearCsv(req.file.buffer)
+    // Limita a 200 linhas no preview — suficiente para detectar colunas, muito mais rápido em arquivos grandes
+    const { registros, encoding, separador } = await parsearCsv(req.file.buffer, 200)
     const cabecalhos = Object.keys(registros[0] ?? {})
     const { emailCol, telefoneCol } = detectarColunas(cabecalhos)
 
@@ -198,39 +202,49 @@ importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: 
       erros:            [] as string[],
     }
 
-    for (const linha of registros) {
-      const email  = linha[emailCol]?.trim().toLowerCase()
-      const telRaw = linha[telefoneCol]?.trim()
+    // Processa em lotes de 100 para eficiência sem sobrecarregar o pool de conexões
+    const LOTE = 100
+    for (let i = 0; i < registros.length; i += LOTE) {
+      const lote = registros.slice(i, i + LOTE)
 
-      if (!email) continue
-      if (!telRaw) { resultado.erros.push(`${email}: telefone vazio`); continue }
+      await Promise.all(lote.map(async linha => {
+        const email  = linha[emailCol!]?.trim().toLowerCase()
+        const telRaw = linha[telefoneCol!]?.trim()
 
-      try {
-        const cliente = await queryOne<{ id: string }>(
-          'SELECT id FROM clientes WHERE LOWER(email) = $1', [email]
-        )
+        if (!email) return
+        if (!telRaw) { resultado.erros.push(`${email}: telefone vazio`); return }
 
-        if (!cliente) { resultado.nao_encontrados.push(email); continue }
+        try {
+          const cliente = await queryOne<{ id: string }>(
+            'SELECT id FROM clientes WHERE LOWER(email) = $1', [email]
+          )
 
-        const { formatado, valido } = formatarTelefone(telRaw)
+          if (!cliente) { resultado.nao_encontrados.push(email); return }
 
-        await pool.query(`
-          UPDATE clientes SET
-            telefone_raw       = $2,
-            telefone_formatado = $3,
-            telefone_valido    = $4,
-            updated_at         = NOW()
-          WHERE id = $1
-        `, [cliente.id, telRaw, formatado, valido])
+          const { formatado, valido } = formatarTelefone(telRaw)
 
-        resultado.atualizados++
-      } catch (err) {
-        resultado.erros.push(`${email}: ${String(err)}`)
+          await pool.query(`
+            UPDATE clientes SET
+              telefone_raw       = $2,
+              telefone_formatado = $3,
+              telefone_valido    = $4,
+              updated_at         = NOW()
+            WHERE id = $1
+          `, [cliente.id, telRaw, formatado, valido])
+
+          resultado.atualizados++
+        } catch (err) {
+          resultado.erros.push(`${email}: ${String(err)}`)
+        }
+      }))
+
+      if ((i + LOTE) % 1000 === 0) {
+        console.log(`[ImportarCSV] Progresso: ${i + LOTE}/${registros.length} linhas`)
       }
     }
 
     console.log(
-      `[ImportarCSV] Processados: ${registros.length}` +
+      `[ImportarCSV] Concluído: ${registros.length} linhas` +
       ` | atualizados: ${resultado.atualizados}` +
       ` | não encontrados: ${resultado.nao_encontrados.length}` +
       ` | erros: ${resultado.erros.length}`

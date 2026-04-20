@@ -1,16 +1,22 @@
 import { useRef, useState } from 'react'
 import { importarCsvApi, type PreviewCsv, type ResultadoImportacao } from '../services/api'
 
-type Etapa = 'idle' | 'preview' | 'importando' | 'resultado'
+type Etapa = 'idle' | 'preview' | 'enviando' | 'processando' | 'resultado'
+
+function formatarTamanho(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 export default function ImportarTelefones() {
   const inputRef = useRef<HTMLInputElement>(null)
-  const [etapa, setEtapa] = useState<Etapa>('idle')
-  const [arquivo, setArquivo] = useState<File | null>(null)
-  const [preview, setPreview] = useState<PreviewCsv | null>(null)
+  const [etapa, setEtapa]       = useState<Etapa>('idle')
+  const [arquivo, setArquivo]   = useState<File | null>(null)
+  const [preview, setPreview]   = useState<PreviewCsv | null>(null)
   const [resultado, setResultado] = useState<ResultadoImportacao | null>(null)
-  const [erro, setErro] = useState<string | null>(null)
-  const [drag, setDrag] = useState(false)
+  const [erro, setErro]         = useState<string | null>(null)
+  const [drag, setDrag]         = useState(false)
+  const [uploadPct, setUploadPct] = useState(0)
 
   // ── Download do modelo ─────────────────────────────────────────────────
   async function baixarModelo() {
@@ -69,13 +75,18 @@ export default function ImportarTelefones() {
   // ── Confirmar importação ───────────────────────────────────────────────
   async function confirmar() {
     if (!arquivo) return
-    setEtapa('importando')
+    setUploadPct(0)
+    setEtapa('enviando')
     try {
-      const data = await importarCsvApi.importar(arquivo)
+      const data = await importarCsvApi.importar(arquivo, pct => {
+        setUploadPct(pct)
+        if (pct === 100) setEtapa('processando')
+      })
       setResultado(data)
       setEtapa('resultado')
-    } catch (e) {
-      setErro('Erro ao importar. Tente novamente.')
+    } catch (e: any) {
+      const msg = e?.response?.data?.error ?? 'Erro ao importar. Tente novamente.'
+      setErro(msg)
       setEtapa('preview')
     }
   }
@@ -247,11 +258,30 @@ export default function ImportarTelefones() {
         </div>
       )}
 
-      {/* Importando */}
-      {etapa === 'importando' && (
-        <div className="text-center py-10">
-          <div className="inline-block w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin mb-3" />
-          <p className="text-sm text-gray-600">Importando telefones...</p>
+      {/* Enviando */}
+      {etapa === 'enviando' && (
+        <div className="py-8 space-y-4">
+          <p className="text-sm font-medium text-gray-700 text-center">
+            Enviando {arquivo ? formatarTamanho(arquivo.size) : 'arquivo'}… {uploadPct}%
+          </p>
+          <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary-500 rounded-full transition-all duration-200"
+              style={{ width: `${uploadPct}%` }}
+            />
+          </div>
+          <p className="text-xs text-gray-400 text-center">Não feche esta página.</p>
+        </div>
+      )}
+
+      {/* Processando no servidor */}
+      {etapa === 'processando' && (
+        <div className="text-center py-10 space-y-3">
+          <div className="inline-block w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm font-medium text-gray-700">
+            Processando {arquivo ? formatarTamanho(arquivo.size) : 'arquivo'}, aguarde…
+          </p>
+          <p className="text-xs text-gray-400">Arquivos grandes podem levar até 2 minutos.</p>
         </div>
       )}
 

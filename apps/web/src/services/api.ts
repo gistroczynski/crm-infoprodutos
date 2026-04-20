@@ -203,10 +203,17 @@ export const importarCsvApi = {
     return api.post<PreviewCsv>('/api/clientes/importar-csv/preview', form).then(r => r.data)
   },
 
-  importar: (arquivo: File) => {
+  importar: (arquivo: File, onUploadProgress?: (pct: number) => void) => {
     const form = new FormData()
     form.append('arquivo', arquivo)
-    return api.post<ResultadoImportacao>('/api/clientes/importar-csv', form).then(r => r.data)
+    return api.post<ResultadoImportacao>('/api/clientes/importar-csv', form, {
+      timeout: 120_000,
+      onUploadProgress: e => {
+        if (onUploadProgress && e.total) {
+          onUploadProgress(Math.round((e.loaded / e.total) * 100))
+        }
+      },
+    }).then(r => r.data)
   },
 }
 

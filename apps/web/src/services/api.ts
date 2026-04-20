@@ -187,10 +187,13 @@ export interface PreviewCsv {
 
 export interface ResultadoImportacao {
   success: boolean
-  total_linhas: number
+  total_linhas_csv: number
+  emails_unicos_encontrados: number
+  com_telefone: number
+  sem_telefone_no_csv: number
   atualizados: number
-  nao_encontrados: string[]
-  erros: string[]
+  nao_encontrados: number
+  erros: number
 }
 
 export const importarCsvApi = {

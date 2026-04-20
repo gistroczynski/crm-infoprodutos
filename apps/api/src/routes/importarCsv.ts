@@ -132,6 +132,15 @@ importarCsvRouter.get('/template', (_req: Request, res: Response) => {
   res.send('\uFEFF' + csv)
 })
 
+// ── Contagem total de linhas sem parsear ────────────────────────────────────
+
+function contarLinhasCsv(buffer: Buffer): number {
+  const { texto } = decodificarBuffer(buffer)
+  // Conta linhas não-vazias excluindo o cabeçalho
+  const linhas = texto.split(/\r?\n/).filter(l => l.trim().length > 0)
+  return Math.max(0, linhas.length - 1) // subtrai cabeçalho
+}
+
 // ── POST /preview ──────────────────────────────────────────────────────────
 
 importarCsvRouter.post('/preview', upload.single('arquivo'), async (req: Request, res: Response) => {
@@ -139,6 +148,7 @@ importarCsvRouter.post('/preview', upload.single('arquivo'), async (req: Request
 
   try {
     // Limita a 200 linhas no preview — suficiente para detectar colunas, muito mais rápido em arquivos grandes
+    const totalLinhas = contarLinhasCsv(req.file.buffer)
     const { registros, encoding, separador } = await parsearCsv(req.file.buffer, 200)
     const cabecalhos = Object.keys(registros[0] ?? {})
     const { emailCol, telefoneCol } = detectarColunas(cabecalhos)
@@ -147,7 +157,7 @@ importarCsvRouter.post('/preview', upload.single('arquivo'), async (req: Request
     console.log(`[ImportarCSV/preview] primeiras 3 linhas:`, JSON.stringify(registros.slice(0, 3), null, 2))
 
     res.json({
-      total_linhas:       registros.length,
+      total_linhas:       totalLinhas,
       encoding_detectado: encoding,
       separador_detectado: separador,
       colunas_detectadas: { email: emailCol, telefone: telefoneCol },
@@ -179,7 +189,7 @@ importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: 
     const { emailCol, telefoneCol } = detectarColunas(cabecalhos)
 
     console.log(`[ImportarCSV] encoding=${encoding} sep="${separador}" colunas=${JSON.stringify(cabecalhos)}`)
-    console.log(`[ImportarCSV] primeiras 3 linhas:`, JSON.stringify(registros.slice(0, 3), null, 2))
+    console.log(`[ImportarCSV] total de linhas: ${registros.length}`)
 
     if (!emailCol) {
       return res.status(400).json({
@@ -196,30 +206,53 @@ importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: 
       })
     }
 
-    const resultado = {
-      atualizados:      0,
-      nao_encontrados:  [] as string[],
-      erros:            [] as string[],
+    // ── Deduplicação: CSV Hotmart tem 1 linha por transação, não por cliente
+    // Percorre todas as linhas e guarda o último telefone não-vazio por email
+    const emailParaTelefone = new Map<string, string>()
+    let semEmailNaLinha = 0
+
+    for (const linha of registros) {
+      const email  = linha[emailCol]?.trim().toLowerCase()
+      const telRaw = linha[telefoneCol]?.trim()
+      if (!email) { semEmailNaLinha++; continue }
+      if (telRaw) {
+        emailParaTelefone.set(email, telRaw)
+      } else if (!emailParaTelefone.has(email)) {
+        // Garante que o email aparece no mapa mesmo sem telefone (para contagem)
+        emailParaTelefone.set(email, '')
+      }
     }
 
-    // Processa em lotes de 100 para eficiência sem sobrecarregar o pool de conexões
-    const LOTE = 100
-    for (let i = 0; i < registros.length; i += LOTE) {
-      const lote = registros.slice(i, i + LOTE)
+    const emailsUnicos      = emailParaTelefone.size
+    const comTelefone       = [...emailParaTelefone.values()].filter(t => t.length > 0).length
+    const semTelefoneNoCsv  = emailsUnicos - comTelefone
 
-      await Promise.all(lote.map(async linha => {
-        const email  = linha[emailCol!]?.trim().toLowerCase()
-        const telRaw = linha[telefoneCol!]?.trim()
+    console.log(`[ImportarCSV] ${registros.length} linhas → ${emailsUnicos} emails únicos (${comTelefone} com telefone)`)
 
-        if (!email) return
-        if (!telRaw) { resultado.erros.push(`${email}: telefone vazio`); return }
+    const resultado = {
+      total_linhas_csv:         registros.length,
+      emails_unicos_encontrados: emailsUnicos,
+      com_telefone:              comTelefone,
+      sem_telefone_no_csv:       semTelefoneNoCsv,
+      atualizados:               0,
+      nao_encontrados:           0,
+      erros:                     0,
+    }
 
+    // Processa apenas emails únicos que têm telefone, em lotes de 500
+    const entradas = [...emailParaTelefone.entries()].filter(([, tel]) => tel.length > 0)
+    const LOTE = 500
+
+    for (let i = 0; i < entradas.length; i += LOTE) {
+      const lote = entradas.slice(i, i + LOTE)
+
+      await Promise.all(lote.map(async ([email, telRaw]) => {
         try {
           const cliente = await queryOne<{ id: string }>(
             'SELECT id FROM clientes WHERE LOWER(email) = $1', [email]
           )
 
-          if (!cliente) { resultado.nao_encontrados.push(email); return }
+          if (!cliente) { resultado.nao_encontrados++; return }
 
           const { formatado, valido } = formatarTelefone(telRaw)
 
@@ -234,23 +267,24 @@ importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: 
 
           resultado.atualizados++
         } catch (err) {
-          resultado.erros.push(`${email}: ${String(err)}`)
+          console.error(`[ImportarCSV] Erro ao atualizar ${email}:`, err)
+          resultado.erros++
         }
       }))
 
-      if ((i + LOTE) % 1000 === 0) {
-        console.log(`[ImportarCSV] Progresso: ${i + LOTE}/${registros.length} linhas`)
-      }
+      console.log(`[ImportarCSV] Progresso: ${Math.min(i + LOTE, entradas.length)}/${entradas.length} emails processados`)
     }
 
     console.log(
-      `[ImportarCSV] Concluído: ${registros.length} linhas` +
-      ` | atualizados: ${resultado.atualizados}` +
-      ` | não encontrados: ${resultado.nao_encontrados.length}` +
-      ` | erros: ${resultado.erros.length}`
+      `[ImportarCSV] Concluído:` +
+      ` linhas=${registros.length}` +
+      ` emails_unicos=${emailsUnicos}` +
+      ` atualizados=${resultado.atualizados}` +
+      ` nao_encontrados=${resultado.nao_encontrados}` +
+      ` erros=${resultado.erros}`
     )
 
-    res.json({ success: true, total_linhas: registros.length, ...resultado })
+    res.json({ success: true, ...resultado })
   } catch (err) {
     console.error('[ImportarCSV] Erro:', err)
     res.status(500).json({

@@ -67,6 +67,122 @@ debugRouter.get('/sync-datas', async (_req: Request, res: Response) => {
   }
 })
 
+// ── GET /api/debug/hotmart-vendas-recentes ─────────────────────────────────
+// Investiga o que a API da Hotmart está retornando para datas recentes.
+// Testa 3 formatos de data e retorna o payload bruto completo.
+// Query param: ?desde=2026-04-13 (padrão: 8 dias atrás)
+debugRouter.get('/hotmart-vendas-recentes', async (req: Request, res: Response) => {
+  try {
+    const desdeStr   = (req.query.desde as string) ?? ''
+    const desdeDate  = desdeStr ? new Date(desdeStr + 'T00:00:00.000Z') : new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
+    const agoraDate  = new Date()
+
+    const startMs  = desdeDate.getTime()         // milliseconds (ex: 1744502400000)
+    const startSec = Math.floor(startMs / 1000)  // seconds     (ex: 1744502400)
+    const endMs    = agoraDate.getTime()
+    const endSec   = Math.floor(endMs / 1000)
+
+    console.log(`[Debug/Hotmart] Testando start_date=${desdeDate.toISOString()} end_date=${agoraDate.toISOString()}`)
+
+    // ── Teste A: milliseconds (formato atual do código) ──────────────────
+    const testeA = await hotmartService.rawRequest('/payments/api/v1/sales/history', {
+      max_results:        50,
+      transaction_status: 'COMPLETE',
+      start_date:         startMs,
+      end_date:           endMs,
+    })
+
+    // ── Teste B: seconds ──────────────────────────────────────────────────
+    const testeB = await hotmartService.rawRequest('/payments/api/v1/sales/history', {
+      max_results:        50,
+      transaction_status: 'COMPLETE',
+      start_date:         startSec,
+      end_date:           endSec,
+    })
+
+    // ── Teste C: sem filtro de data — últimas N transações ────────────────
+    const testeC = await hotmartService.rawRequest('/payments/api/v1/sales/history', {
+      max_results:        50,
+      transaction_status: 'COMPLETE',
+    })
+
+    // ── Teste D: sem filtro de status (tudo) ──────────────────────────────
+    const testeD = await hotmartService.rawRequest('/payments/api/v1/sales/history', {
+      max_results: 10,
+      start_date:  startMs,
+      end_date:    endMs,
+    })
+
+    function resumir(result: Awaited<ReturnType<typeof hotmartService.rawRequest>>, label: string) {
+      const body = result.body as {
+        items?: Array<{ purchase?: { order_date?: number; transaction?: string; status?: string }; product?: { name?: string }; buyer?: { email?: string } }>
+        page_info?: { total_results?: number; next_page_token?: string; results_per_page?: number }
+      }
+      const items = body?.items ?? []
+      const pageInfo = body?.page_info ?? {}
+
+      // Datas dos itens retornados (para ver se bate com o filtro)
+      const datas = items.map(i => i.purchase?.order_date
+        ? new Date(i.purchase.order_date).toISOString().slice(0, 10)
+        : 'sem_data'
+      )
+
+      return {
+        label,
+        status_http:           result.status,
+        total_results_hotmart: pageInfo.total_results ?? 0,
+        items_retornados:      items.length,
+        tem_proxima_pagina:    !!pageInfo.next_page_token,
+        next_page_token:       pageInfo.next_page_token ?? null,
+        datas_dos_itens:       [...new Set(datas)].sort(),
+        data_mais_recente:     datas.length ? [...datas].sort().reverse()[0] : null,
+        data_mais_antiga:      datas.length ? [...datas].sort()[0] : null,
+        primeiros_5_itens: items.slice(0, 5).map(i => ({
+          transaction: i.purchase?.transaction,
+          status:      i.purchase?.status,
+          data:        i.purchase?.order_date ? new Date(i.purchase.order_date).toISOString() : null,
+          produto:     i.product?.name,
+          buyer_email: i.buyer?.email,
+        })),
+        campos_disponiveis: items[0] ? Object.keys(items[0]) : [],
+        payload_bruto_item0: items[0] ?? null,
+      }
+    }
+
+    res.json({
+      parametros_usados: {
+        desde_iso:    desdeDate.toISOString(),
+        ate_iso:      agoraDate.toISOString(),
+        start_date_ms:  startMs,
+        end_date_ms:    endMs,
+        start_date_sec: startSec,
+        end_date_sec:   endSec,
+      },
+      teste_A_milliseconds:   resumir(testeA, 'start_date em milliseconds (formato atual)'),
+      teste_B_seconds:        resumir(testeB, 'start_date em seconds'),
+      teste_C_sem_data:       resumir(testeC, 'sem filtro de data (últimas 50)'),
+      teste_D_sem_status:     resumir(testeD, 'com data ms, sem filtro de status'),
+      diagnostico: {
+        formato_que_funciona: (() => {
+          const bodyA = testeA.body as { items?: unknown[] }
+          const bodyB = testeB.body as { items?: unknown[] }
+          const bodyC = testeC.body as { items?: unknown[] }
+          const qtdA = (bodyA?.items ?? []).length
+          const qtdB = (bodyB?.items ?? []).length
+          const qtdC = (bodyC?.items ?? []).length
+          if (qtdA > 0) return `✅ Milliseconds funciona (${qtdA} itens)`
+          if (qtdB > 0) return `✅ Seconds funciona (${qtdB} itens)`
+          if (qtdC > 0) return `⚠️ Nenhum formato com data retorna itens. Sem filtro: ${qtdC} itens — possível que não haja vendas nesse período.`
+          return '❌ Nenhuma venda retornada em nenhum formato — verificar credenciais ou período'
+        })(),
+      },
+    })
+  } catch (err) {
+    console.error('[Debug/Hotmart] Erro:', err)
+    res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
 // ── GET /api/debug/transacoes-raw ─────────────────────────────────────────
 // 5 últimas transações sem filtro de status — payload completo para análise
 debugRouter.get('/transacoes-raw', async (req: Request, res: Response) => {

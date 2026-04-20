@@ -79,7 +79,7 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
           COALESCE(co.is_order_bump, false)  AS is_order_bump,
           co.valor::float                    AS valor,
           co.data_compra,
-          (CURRENT_DATE - co.data_compra::date)::int AS dias_atras
+          (${HOJE_BRT} - (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date)::int AS dias_atras
         ${FROM_JOIN}
         ${listWhere}
         ORDER BY co.data_compra DESC
@@ -99,13 +99,13 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
 
       query<{ data: string; quantidade: string; receita: string }>(`
         SELECT
-          co.data_compra::date::text            AS data,
+          (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date::text AS data,
           COUNT(*)::text                        AS quantidade,
           COALESCE(SUM(co.valor::numeric), 0)::text AS receita
         ${FROM_JOIN}
         ${baseWhere}
-        GROUP BY co.data_compra::date
-        ORDER BY co.data_compra::date
+        GROUP BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date
+        ORDER BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date
       `, baseParams),
     ])
 
@@ -135,14 +135,19 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
   }
 })
 
+// ── Constante de timezone ──────────────────────────────────────────────────
+// O banco armazena timestamps em UTC. Compara no timezone do Brasil para que
+// vendas feitas entre 00:00-03:00 BRT (03:00-06:00 UTC) apareçam como "hoje".
+const TZ = `'America/Sao_Paulo'`
+const HOJE_BRT  = `(NOW() AT TIME ZONE ${TZ})::date`
+const ONTEM_BRT = `(NOW() AT TIME ZONE ${TZ})::date - 1`
+const DATA_BRT  = (col: string) => `(${col} AT TIME ZONE ${TZ})::date`
+
 // ── GET /api/vendas/hoje ────────────────────────────────────────────────────
 
 vendasRouter.get('/hoje', async (req: Request, res: Response) => {
   try {
-    const hoje   = new Date().toISOString().split('T')[0]
-    const ontem  = new Date(Date.now() - 86_400_000).toISOString().split('T')[0]
-
-    const [vendasHoje, statsHoje, statsOntem] = await Promise.all([
+    const [vendasHoje, statsHoje, statsOntem, topProdutos] = await Promise.all([
 
       query<{
         id: string; transaction_id: string; cliente_id: string
@@ -164,9 +169,9 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           co.data_compra
         ${FROM_JOIN}
         WHERE co.status = 'COMPLETE'
-          AND co.data_compra::date = $1::date
+          AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
         ORDER BY co.data_compra DESC
-      `, [hoje]),
+      `),
 
       queryOne<{ total: string; receita: string; ticket: string }>(`
         SELECT
@@ -177,8 +182,8 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
                ELSE '0' END                        AS ticket
         ${FROM_JOIN}
         WHERE co.status = 'COMPLETE'
-          AND co.data_compra::date = $1::date
-      `, [hoje]),
+          AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
+      `),
 
       queryOne<{ total: string; receita: string }>(`
         SELECT
@@ -186,24 +191,22 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           COALESCE(SUM(co.valor::numeric), 0)::text AS receita
         ${FROM_JOIN}
         WHERE co.status = 'COMPLETE'
-          AND co.data_compra::date = $1::date
-      `, [ontem]),
+          AND ${DATA_BRT('co.data_compra')} = ${ONTEM_BRT}
+      `),
 
-      // Top produtos hoje
+      query<{ nome: string; quantidade: string; receita: string }>(`
+        SELECT
+          p.nome,
+          COUNT(*)::text                             AS quantidade,
+          COALESCE(SUM(co.valor::numeric), 0)::text AS receita
+        ${FROM_JOIN}
+        WHERE co.status = 'COMPLETE'
+          AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
+        GROUP BY p.nome
+        ORDER BY COUNT(*) DESC
+        LIMIT 5
+      `),
     ])
-
-    const topProdutos = await query<{ nome: string; quantidade: string; receita: string }>(`
-      SELECT
-        p.nome,
-        COUNT(*)::text                             AS quantidade,
-        COALESCE(SUM(co.valor::numeric), 0)::text AS receita
-      ${FROM_JOIN}
-      WHERE co.status = 'COMPLETE'
-        AND co.data_compra::date = $1::date
-      GROUP BY p.nome
-      ORDER BY COUNT(*) DESC
-      LIMIT 5
-    `, [hoje])
 
     const totalHoje   = Number(statsHoje?.total   ?? 0)
     const receitaHoje = Number(statsHoje?.receita  ?? 0)
@@ -250,7 +253,7 @@ vendasRouter.get('/resumo-diario', async (req: Request, res: Response) => {
       data: string; produto_nome: string; quantidade: string; receita: string
     }>(`
       SELECT
-        co.data_compra::date::text              AS data,
+        (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date::text AS data,
         p.nome                                  AS produto_nome,
         COUNT(*)::text                          AS quantidade,
         COALESCE(SUM(co.valor::numeric), 0)::text AS receita
@@ -258,8 +261,8 @@ vendasRouter.get('/resumo-diario', async (req: Request, res: Response) => {
       WHERE co.status = 'COMPLETE'
         AND co.data_compra >= $1::date
         AND co.data_compra <  ($2::date + INTERVAL '1 day')
-      GROUP BY co.data_compra::date, p.nome
-      ORDER BY co.data_compra::date, p.nome
+      GROUP BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date, p.nome
+      ORDER BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date, p.nome
     `, [inicio, fim])
 
     // Agrupar por data

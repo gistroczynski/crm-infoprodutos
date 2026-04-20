@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import {
   vendasApi, produtosApi,
-  type VendaItem, type VendasHojeResponse, type ResumoDiarioItem,
+  type VendaItem, type VendasHojeResponse,
 } from '../services/api'
 import type { Produto } from '@crm/shared'
 import { useToast } from '../hooks/useToast'
@@ -46,11 +46,10 @@ function calcRange(periodo: Periodo): { inicio: string; fim: string } {
     ini.setDate(hoje.getDate() - 6)
     return { inicio: fmt(ini), fim: fmt(hoje) }
   }
-  // mes (default)
-  return {
-    inicio: fmt(new Date(hoje.getFullYear(), hoje.getMonth(), 1)),
-    fim:    fmt(hoje),
-  }
+  // mes = últimos 30 dias completos
+  const ini = new Date(hoje)
+  ini.setDate(hoje.getDate() - 29)
+  return { inicio: fmt(ini), fim: fmt(hoje) }
 }
 
 // ── Badge tipo produto ───────────────────────────────────────────────────────
@@ -136,12 +135,20 @@ export default function Vendas() {
   const [produtos,    setProdutos]    = useState<Produto[]>([])
   const [loading,     setLoading]     = useState(true)
   const [syncing,     setSyncing]     = useState(false)
+  const [avisoConexao, setAvisoConexao] = useState(false)
 
-  // Ref para detectar nova venda
+  // Ref estável para toast (evita que toast no dep array cause loop de re-renders)
+  const toastRef = useRef(toast)
+  useEffect(() => { toastRef.current = toast })
+
+  // Controla se o toast de erro já foi exibido (só mostra 1x por sessão de erro)
+  const erroJaMostradoRef = useRef(false)
+
+  // Refs para detecção de nova venda
   const prevTotalHojeRef = useRef<number | null>(null)
   const prevLastVendaRef = useRef<string | null>(null)
 
-  // ── Buscar vendas de hoje (polling) ──────────────────────────────────────
+  // ── Buscar vendas de hoje (polling silencioso — sem toast em erro) ─────────
 
   const fetchHoje = useCallback(async (notificar = false) => {
     try {
@@ -152,7 +159,7 @@ export default function Vendas() {
         if (data.total_hoje > prevTotalHojeRef.current) {
           const nova = data.vendas[0]
           if (nova && nova.id !== prevLastVendaRef.current) {
-            toast.success(
+            toastRef.current.success(
               `Nova venda! ${nova.produto_nome} — ${nova.valor ? brl(nova.valor) : ''}`
             )
             prevLastVendaRef.current = nova.id
@@ -160,8 +167,10 @@ export default function Vendas() {
         }
       }
       prevTotalHojeRef.current = data.total_hoje
-    } catch {}
-  }, [toast])
+    } catch {
+      // Polling silencioso — não interrompe o usuário com toast
+    }
+  }, []) // sem toast no dep array — usa toastRef
 
   // ── Buscar lista de vendas ────────────────────────────────────────────────
 
@@ -180,12 +189,19 @@ export default function Vendas() {
       setTotalVendas(data.total)
       setTotalPages(data.total_pages)
       setPorDia(data.resumo.por_dia)
+      erroJaMostradoRef.current = false
+      setAvisoConexao(false)
     } catch {
-      toast.error('Erro ao carregar vendas.')
+      // Mostra toast apenas na primeira falha; polling subsequente apenas ativa o ícone de aviso
+      if (!erroJaMostradoRef.current) {
+        erroJaMostradoRef.current = true
+        toastRef.current.error('Erro ao carregar vendas. Verifique a conexão.')
+      }
+      setAvisoConexao(true)
     } finally {
       setLoading(false)
     }
-  }, [dataInicio, dataFim, page, produtoId, busca, toast])
+  }, [dataInicio, dataFim, page, produtoId, busca]) // sem toast — usa toastRef
 
   // ── Montar ────────────────────────────────────────────────────────────────
 
@@ -216,43 +232,53 @@ export default function Vendas() {
     setPage(1)
   }
 
-  // ── Sincronizar ───────────────────────────────────────────────────────────
+  // ── Sincronizar — aguarda e reporta novas vendas ───────────────────────────
 
   async function sincronizar() {
     setSyncing(true)
+    const totalAntes = totalVendas
     try {
       await api.post('/api/sync/manual')
-      toast.info('Sincronização iniciada. Atualizando em alguns segundos...')
-      setTimeout(() => { fetchVendas(); fetchHoje(false) }, 5000)
+      toastRef.current.info('Sincronizando com Hotmart...')
+      // Aguarda o sync processar no servidor (~8s)
+      await new Promise(r => setTimeout(r, 8000))
+      const [dados] = await Promise.all([
+        vendasApi.list({
+          inicio: dataInicio, fim: dataFim, page, limit: 50,
+          produto_id: produtoId || undefined,
+          busca:      busca    || undefined,
+        }),
+        vendasApi.hoje().then(setHoje).catch(() => {}),
+      ])
+      setVendas(dados.vendas)
+      setTotalVendas(dados.total)
+      setTotalPages(dados.total_pages)
+      setPorDia(dados.resumo.por_dia)
+      erroJaMostradoRef.current = false
+      setAvisoConexao(false)
+      const novas = dados.total - totalAntes
+      if (novas > 0) {
+        toastRef.current.success(
+          `Sincronizado! ${novas} nova${novas !== 1 ? 's vendas encontradas' : ' venda encontrada'}.`
+        )
+      } else {
+        toastRef.current.success('Sincronizado! Nenhuma venda nova no período.')
+      }
     } catch {
-      toast.error('Falha ao iniciar sincronização.')
+      toastRef.current.error('Falha ao iniciar sincronização.')
     } finally {
       setSyncing(false)
     }
   }
 
-  // ── Busca com debounce ────────────────────────────────────────────────────
-
-  const buscaTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   function onBuscaChange(v: string) {
     setBusca(v)
     setPage(1)
-    if (buscaTimeout.current) clearTimeout(buscaTimeout.current)
   }
 
-  // ── Vendas do mês (para card) ─────────────────────────────────────────────
-
-  const hoje_str  = new Date().toISOString().split('T')[0]
-  const iniMes    = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
-
-  // Se o período já é o mês, reusa totalVendas; senão precisamos de uma chamada separada
-  // Para simplificar, mostramos o total do período selecionado no 4º card quando não é mês
-  const vendasPeriodo = totalVendas
-
-  // Máximo do gráfico para escala proporcional
-  const maxQtd     = Math.max(...porDia.map(d => d.quantidade), 1)
+  // Máximo para barra de progresso do ranking
   const topProdMax = Math.max(...(hoje?.top_produtos.map(t => t.quantidade) ?? [1]), 1)
+  const vendasPeriodo = totalVendas
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -261,7 +287,20 @@ export default function Vendas() {
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Vendas</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-bold text-gray-900">Vendas</h1>
+          {avisoConexao && (
+            <span
+              title="Erro ao carregar dados — tente sincronizar"
+              className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+              Sem dados
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           {/* Seletor de período */}
           <div className="flex items-center bg-gray-100 rounded-lg p-0.5 text-sm">

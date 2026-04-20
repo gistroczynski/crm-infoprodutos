@@ -5,6 +5,7 @@ import api from '../../services/api'
 import {
   ClipboardListIcon,
   UsersIcon,
+  ShoppingCartIcon,
   LayoutDashboardIcon,
   BarChart3Icon,
   SettingsIcon,
@@ -19,6 +20,23 @@ function usePendingCount() {
     const fetch = () => {
       api.get<{ itens: { status_contato: string }[] }>('/api/lista/hoje')
         .then(r => setCount(r.data.itens.filter(i => i.status_contato === 'pendente').length))
+        .catch(() => {})
+    }
+    fetch()
+    const interval = setInterval(fetch, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  return count
+}
+
+function useVendasHojeCount() {
+  const [count, setCount] = useState(0)
+
+  useEffect(() => {
+    const fetch = () => {
+      api.get<{ total_hoje: number }>('/api/vendas/hoje')
+        .then(r => setCount(r.data.total_hoje))
         .catch(() => {})
     }
     fetch()
@@ -67,6 +85,7 @@ function tempoPassado(iso: string | null): string {
 export default function Sidebar() {
   const toast       = useToast()
   const pending     = usePendingCount()
+  const vendasHoje  = useVendasHojeCount()
   const { ultimaSync, emAndamento, refetch } = useSyncStatus()
   const [syncing, setSyncing] = useState(false)
 
@@ -84,11 +103,12 @@ export default function Sidebar() {
   }
 
   const navItems = [
-    { to: '/lista-diaria', label: 'Lista Diária', Icon: ClipboardListIcon, badge: pending > 0 ? pending : 0 },
-    { to: '/clientes',     label: 'Clientes',     Icon: UsersIcon,          badge: 0 },
-    { to: '/dashboard',    label: 'Dashboard',    Icon: LayoutDashboardIcon,badge: 0 },
-    { to: '/relatorios',   label: 'Relatórios',   Icon: BarChart3Icon,      badge: 0 },
-    { to: '/configuracoes',label: 'Configurações',Icon: SettingsIcon,       badge: 0 },
+    { to: '/lista-diaria', label: 'Lista Diária', Icon: ClipboardListIcon,  badge: pending    > 0 ? pending    : 0, badgeColor: 'bg-red-500' },
+    { to: '/clientes',     label: 'Clientes',     Icon: UsersIcon,           badge: 0,                              badgeColor: 'bg-red-500' },
+    { to: '/vendas',       label: 'Vendas',       Icon: ShoppingCartIcon,    badge: vendasHoje > 0 ? vendasHoje : 0, badgeColor: 'bg-green-500' },
+    { to: '/dashboard',    label: 'Dashboard',    Icon: LayoutDashboardIcon, badge: 0,                              badgeColor: 'bg-red-500' },
+    { to: '/relatorios',   label: 'Relatórios',   Icon: BarChart3Icon,       badge: 0,                              badgeColor: 'bg-red-500' },
+    { to: '/configuracoes',label: 'Configurações',Icon: SettingsIcon,        badge: 0,                              badgeColor: 'bg-red-500' },
   ]
 
   return (
@@ -100,7 +120,7 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {navItems.map(({ to, label, Icon, badge }) => (
+        {navItems.map(({ to, label, Icon, badge, badgeColor }) => (
           <NavLink
             key={to}
             to={to}
@@ -116,7 +136,7 @@ export default function Sidebar() {
             <Icon className="h-5 w-5 flex-shrink-0" />
             <span className="flex-1">{label}</span>
             {badge > 0 && (
-              <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-red-500 text-white">
+              <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold ${badgeColor} text-white`}>
                 {badge > 99 ? '99+' : badge}
               </span>
             )}

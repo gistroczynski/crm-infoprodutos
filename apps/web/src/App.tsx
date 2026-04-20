@@ -8,6 +8,7 @@ import Cliente from './pages/Cliente'
 import Dashboard from './pages/Dashboard'
 import Relatorios from './pages/Relatorios'
 import Configuracoes from './pages/Configuracoes'
+import Vendas from './pages/Vendas'
 import Erro404 from './pages/Erro404'
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="lista-diaria" element={<ListaDiaria />} />
           <Route path="clientes" element={<Clientes />} />
           <Route path="clientes/:id" element={<Cliente />} />
+          <Route path="vendas" element={<Vendas />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="relatorios" element={<Relatorios />} />
           <Route path="configuracoes" element={<Configuracoes />} />

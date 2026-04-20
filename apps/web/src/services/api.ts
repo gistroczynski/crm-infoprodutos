@@ -220,4 +220,73 @@ export const importarCsvApi = {
   },
 }
 
+// ── Vendas ────────────────────────────────────────────────────────────────
+
+export interface VendaItem {
+  id: string
+  transaction_id: string
+  cliente_id: string
+  cliente_nome: string
+  cliente_email: string
+  cliente_telefone: string | null
+  produto_nome: string
+  produto_tipo: string
+  is_order_bump: boolean
+  valor: number | null
+  data_compra: string
+  dias_atras: number
+}
+
+export interface ResumoVendas {
+  total_vendas: number
+  receita_total: number
+  ticket_medio: number
+  por_dia: { data: string; quantidade: number; receita: number }[]
+}
+
+export interface VendasListResponse {
+  vendas: VendaItem[]
+  total: number
+  page: number
+  limit: number
+  total_pages: number
+  resumo: ResumoVendas
+}
+
+export interface VendasHojeResponse {
+  vendas: Omit<VendaItem, 'dias_atras'>[]
+  total_hoje: number
+  receita_hoje: number
+  ticket_hoje: number
+  top_produtos: { nome: string; quantidade: number; receita: number }[]
+  comparacao_ontem: {
+    total_ontem: number
+    receita_ontem: number
+    variacao_vendas_pct: number | null
+    variacao_receita_pct: number | null
+  }
+}
+
+export interface ResumoDiarioItem {
+  data: string
+  quantidade: number
+  receita: number
+  produtos: { nome: string; quantidade: number; receita: number }[]
+}
+
+export const vendasApi = {
+  list: (params?: {
+    inicio?: string; fim?: string
+    page?: number; limit?: number
+    produto_id?: string; busca?: string
+  }) =>
+    api.get<VendasListResponse>('/api/vendas', { params }).then(r => r.data),
+
+  hoje: () =>
+    api.get<VendasHojeResponse>('/api/vendas/hoje').then(r => r.data),
+
+  resumoDiario: (inicio: string, fim: string) =>
+    api.get<ResumoDiarioItem[]>('/api/vendas/resumo-diario', { params: { inicio, fim } }).then(r => r.data),
+}
+
 export default api

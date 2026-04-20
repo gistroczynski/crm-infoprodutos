@@ -17,6 +17,7 @@ import { webhookRouter } from './routes/webhook'
 import { importarCsvRouter } from './routes/importarCsv'
 import { debugRouter } from './routes/debug'
 import { relatoriosRouter } from './routes/relatorios'
+import { vendasRouter } from './routes/vendas'
 import { errorHandler } from './middleware/errorHandler'
 import { executarSync } from './jobs/sync'
 import { executarGeracaoLista } from './jobs/lista'
@@ -120,6 +121,7 @@ app.use('/api/webhook', webhookRouter)
 app.use('/api/clientes/importar-csv', importarCsvRouter)
 app.use('/api/debug', debugRouter)
 app.use('/api/relatorios', relatoriosRouter)
+app.use('/api/vendas', vendasRouter)
 
 // ── Error handler ──────────────────────────────────────────────────────────
 app.use(errorHandler)

@@ -226,13 +226,13 @@ export class HotmartService {
   // ── Vendas paginadas ──────────────────────────────────────────────────────
 
   /**
-   * Busca vendas de uma janela específica (paginado por page_token).
-   * A API Hotmart exige start_date/end_date — sem eles retorna apenas ~30 dias.
+   * Busca todas as páginas de um status específico em uma janela de datas.
    */
-  async buscarVendasPorJanela(
+  private async buscarPaginasPorStatus(
     startMs: number,
     endMs: number,
-    label: string
+    label: string,
+    status: 'COMPLETE' | 'APPROVED'
   ): Promise<HotmartSaleItem[]> {
     const itens: HotmartSaleItem[] = []
     let proximaPagina: string | undefined
@@ -241,7 +241,7 @@ export class HotmartService {
     do {
       const params: Record<string, string | number> = {
         max_results: 50,
-        transaction_status: 'COMPLETE',
+        transaction_status: status,
         start_date: startMs,
         end_date: endMs,
       }
@@ -257,7 +257,7 @@ export class HotmartService {
       proximaPagina = data.page_info?.next_page_token
 
       console.log(
-        `[Hotmart] ${label} — pág ${pagina}: ${novos.length} itens | acumulado: ${itens.length}/${data.page_info?.total_results ?? '?'}`
+        `[Hotmart] ${label}/${status} — pág ${pagina}: ${novos.length} itens | acumulado: ${itens.length}/${data.page_info?.total_results ?? '?'}`
       )
 
       pagina++
@@ -265,6 +265,38 @@ export class HotmartService {
     } while (proximaPagina)
 
     return itens
+  }
+
+  /**
+   * Busca vendas de uma janela específica para os status COMPLETE e APPROVED.
+   * A API Hotmart usa APPROVED para compras recentes aprovadas (PIX, cartão) e
+   * COMPLETE para transações totalmente liquidadas/antigas. Ambos representam
+   * vendas válidas para o CRM.
+   * Os dois status são buscados em paralelo e deduplicados por transaction_id.
+   */
+  async buscarVendasPorJanela(
+    startMs: number,
+    endMs: number,
+    label: string
+  ): Promise<HotmartSaleItem[]> {
+    const [completas, aprovadas] = await Promise.all([
+      this.buscarPaginasPorStatus(startMs, endMs, label, 'COMPLETE'),
+      this.buscarPaginasPorStatus(startMs, endMs, label, 'APPROVED'),
+    ])
+
+    // Deduplica por transaction_id (uma mesma compra pode mudar de APPROVED → COMPLETE)
+    const visto = new Set<string>()
+    const todas = [...completas, ...aprovadas].filter(item => {
+      const tx = item.purchase.transaction
+      if (visto.has(tx)) return false
+      visto.add(tx)
+      return true
+    })
+
+    console.log(
+      `[Hotmart] ${label} — total merged: ${todas.length} (COMPLETE: ${completas.length}, APPROVED: ${aprovadas.length})`
+    )
+    return todas
   }
 
   /**

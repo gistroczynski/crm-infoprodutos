@@ -200,7 +200,7 @@ export async function buscarListaHoje(
     LEFT JOIN LATERAL (
       SELECT co.produto_id, co.data_compra
       FROM compras co
-      WHERE co.cliente_id = ld.cliente_id AND co.status = 'COMPLETE'
+      WHERE co.cliente_id = ld.cliente_id AND co.status IN ('COMPLETE', 'APPROVED')
       ORDER BY co.data_compra DESC
       LIMIT 1
     ) co_last ON true

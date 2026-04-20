@@ -51,7 +51,7 @@ export async function buscarCandidatos(
         SELECT 1 FROM compras co2
         WHERE co2.cliente_id = c.id
           AND co2.produto_id = $1::uuid
-          AND co2.status = 'COMPLETE'
+          AND co2.status IN ('COMPLETE', 'APPROVED')
        )`
     : ''
 
@@ -78,7 +78,7 @@ export async function buscarCandidatos(
         '[]'
       )::text                                      AS tipos_comprados
     FROM clientes c
-    LEFT JOIN compras co ON co.cliente_id = c.id AND co.status = 'COMPLETE'
+    LEFT JOIN compras co ON co.cliente_id = c.id AND co.status IN ('COMPLETE', 'APPROVED')
     LEFT JOIN produtos p ON p.id = co.produto_id
     WHERE c.email IS NOT NULL
     ${filtroExcluirPrincipal}

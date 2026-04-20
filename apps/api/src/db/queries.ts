@@ -183,7 +183,7 @@ export async function buscarUltimaSync(): Promise<string | null> {
  */
 export async function buscarDataUltimaCompra(): Promise<Date | null> {
   const row = await queryOne<{ data_compra: string }>(
-    `SELECT MAX(data_compra)::text AS data_compra FROM compras WHERE status = 'COMPLETE'`
+    `SELECT MAX(data_compra)::text AS data_compra FROM compras WHERE status IN ('COMPLETE', 'APPROVED')`
   )
   return row?.data_compra ? new Date(row.data_compra) : null
 }

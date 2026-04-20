@@ -80,7 +80,7 @@ export async function reclassificarTodasCompras(valorMaximoOB = 100): Promise<{
   // Reseta classificação primeiro (para re-rodar idempotente)
   await pool.query(`
     UPDATE compras SET is_order_bump = false, motivo_classificacao = NULL
-    WHERE status = 'COMPLETE'
+    WHERE status IN ('COMPLETE', 'APPROVED')
   `)
 
   // ── Regra b: offer_code ─────────────────────────────────────────────────
@@ -88,7 +88,7 @@ export async function reclassificarTodasCompras(valorMaximoOB = 100): Promise<{
     UPDATE compras
     SET is_order_bump        = true,
         motivo_classificacao = 'offer_code:' || offer_code
-    WHERE status  = 'COMPLETE'
+    WHERE status IN ('COMPLETE', 'APPROVED')
       AND offer_code IS NOT NULL
       AND offer_code ~* '(bump|_ob[_-]|^ob[_-]|order.?bump)'
   `)
@@ -104,11 +104,11 @@ export async function reclassificarTodasCompras(valorMaximoOB = 100): Promise<{
       JOIN compras co2
         ON co1.cliente_id = co2.cliente_id
         AND co1.id          != co2.id
-        AND co1.status       = 'COMPLETE'
-        AND co2.status       = 'COMPLETE'
+        AND co1.status IN ('COMPLETE', 'APPROVED')
+        AND co2.status IN ('COMPLETE', 'APPROVED')
         AND ABS(EXTRACT(EPOCH FROM (co1.data_compra - co2.data_compra))) <= 120
         AND co1.is_order_bump = false    -- não reclassificar já marcados por offer_code
-      WHERE co1.status = 'COMPLETE'
+      WHERE co1.status IN ('COMPLETE', 'APPROVED')
         AND co1.valor  IS NOT NULL
         AND co1.valor  <= $1
       GROUP BY co1.id, co1.valor
@@ -128,7 +128,7 @@ export async function reclassificarTodasCompras(valorMaximoOB = 100): Promise<{
     SELECT
       COUNT(CASE WHEN is_order_bump = true  THEN 1 END)::int AS marcadas,
       COUNT(CASE WHEN is_order_bump = false THEN 1 END)::int AS nao_marcadas
-    FROM compras WHERE status = 'COMPLETE'
+    FROM compras WHERE status IN ('COMPLETE', 'APPROVED')
   `)
 
   return {
@@ -159,7 +159,7 @@ export async function reclassificarComprasCliente(
     SELECT id, hotmart_transaction_id, valor::text, offer_code, data_compra
     FROM compras
     WHERE cliente_id = $1
-      AND status = 'COMPLETE'
+      AND status IN ('COMPLETE', 'APPROVED')
       AND data_compra >= NOW() - INTERVAL '24 hours'
     ORDER BY data_compra
   `, [clienteId])

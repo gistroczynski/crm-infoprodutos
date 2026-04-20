@@ -45,11 +45,11 @@ relatoriosRouter.get('/ascensao', async (req: Request, res: Response) => {
           SELECT co2.cliente_id
           FROM compras co2
           JOIN produtos p2 ON p2.id = co2.produto_id AND p2.tipo = 'principal'
-          WHERE co2.status = 'COMPLETE'
+          WHERE co2.status IN ('COMPLETE', 'APPROVED')
             AND co2.data_compra::date >= $1::date
             AND co2.data_compra::date <= $2::date
         ) co_up ON co_up.cliente_id = co_all.cliente_id
-        WHERE co_all.status = 'COMPLETE'
+        WHERE co_all.status IN ('COMPLETE', 'APPROVED')
           AND co_all.data_compra::date >= $1::date
           AND co_all.data_compra::date <= $2::date
       `, [inicio, fim]),
@@ -65,8 +65,8 @@ relatoriosRouter.get('/ascensao', async (req: Request, res: Response) => {
           JOIN produtos p_up ON p_up.id = co_up.produto_id AND p_up.tipo = 'principal'
           JOIN compras co_en ON co_en.cliente_id = co_up.cliente_id
           JOIN produtos p_en ON p_en.id = co_en.produto_id AND p_en.tipo = 'entrada'
-          WHERE co_up.status = 'COMPLETE'
-            AND co_en.status = 'COMPLETE'
+          WHERE co_up.status IN ('COMPLETE', 'APPROVED')
+            AND co_en.status IN ('COMPLETE', 'APPROVED')
             AND co_up.data_compra::date >= $1::date
             AND co_up.data_compra::date <= $2::date
           GROUP BY co_up.cliente_id
@@ -81,7 +81,7 @@ relatoriosRouter.get('/ascensao', async (req: Request, res: Response) => {
           COUNT(DISTINCT co.cliente_id)::int                         AS quantidade
         FROM compras co
         JOIN produtos p ON p.id = co.produto_id AND p.tipo = 'principal'
-        WHERE co.status = 'COMPLETE'
+        WHERE co.status IN ('COMPLETE', 'APPROVED')
           AND co.data_compra::date >= $1::date
           AND co.data_compra::date <= $2::date
         GROUP BY DATE_TRUNC('week', co.data_compra::date)
@@ -118,7 +118,7 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
                  COALESCE(SUM(co.valor::numeric), 0)::float AS receita
           FROM compras co
-          WHERE co.status = 'COMPLETE'
+          WHERE co.status IN ('COMPLETE', 'APPROVED')
             AND co.produto_id = ANY($1::uuid[])
             AND co.data_compra::date >= $2::date
             AND co.data_compra::date <= $3::date
@@ -128,7 +128,7 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
                  COALESCE(SUM(co.valor::numeric), 0)::float AS receita
           FROM compras co
           JOIN produtos p ON p.id = co.produto_id
-          WHERE co.status = 'COMPLETE'
+          WHERE co.status IN ('COMPLETE', 'APPROVED')
             AND COALESCE(p.tipo, 'entrada') = 'entrada'
             AND co.data_compra::date >= $1::date
             AND co.data_compra::date <= $2::date
@@ -139,7 +139,7 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
       SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
              COALESCE(SUM(co.valor::numeric), 0)::float AS receita
       FROM compras co
-      WHERE co.status = 'COMPLETE'
+      WHERE co.status IN ('COMPLETE', 'APPROVED')
         AND co.is_order_bump = true
         AND co.data_compra::date >= $1::date
         AND co.data_compra::date <= $2::date
@@ -151,7 +151,7 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
                  COALESCE(SUM(co.valor::numeric), 0)::float AS receita
           FROM compras co
-          WHERE co.status = 'COMPLETE'
+          WHERE co.status IN ('COMPLETE', 'APPROVED')
             AND co.produto_id = ANY($1::uuid[])
             AND co.data_compra::date >= $2::date
             AND co.data_compra::date <= $3::date
@@ -161,7 +161,7 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
                  COALESCE(SUM(co.valor::numeric), 0)::float AS receita
           FROM compras co
           JOIN produtos p ON p.id = co.produto_id
-          WHERE co.status = 'COMPLETE'
+          WHERE co.status IN ('COMPLETE', 'APPROVED')
             AND p.tipo = 'principal'
             AND co.data_compra::date >= $1::date
             AND co.data_compra::date <= $2::date
@@ -273,7 +273,7 @@ relatoriosRouter.get('/produtos', async (req: Request, res: Response) => {
         COUNT(DISTINCT co.cliente_id)::int         AS novos_clientes
       FROM produtos p
       JOIN compras co ON co.produto_id = p.id
-        AND co.status = 'COMPLETE'
+        AND co.status IN ('COMPLETE', 'APPROVED')
         AND co.valor  IS NOT NULL
         AND co.data_compra::date >= $1::date
         AND co.data_compra::date <= $2::date

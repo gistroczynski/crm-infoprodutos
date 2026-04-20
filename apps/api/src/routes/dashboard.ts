@@ -48,7 +48,7 @@ async function buscarEtapaFunil(
         COUNT(DISTINCT co.cliente_id)::int         AS total_clientes,
         COALESCE(SUM(co.valor::numeric), 0)::float AS receita
       FROM compras co
-      WHERE co.status = 'COMPLETE'
+      WHERE co.status IN ('COMPLETE', 'APPROVED')
         AND co.produto_id = ANY($1::uuid[])
         AND co.data_compra::date >= $2::date
         AND co.data_compra::date <= $3::date
@@ -61,7 +61,7 @@ async function buscarEtapaFunil(
       COALESCE(SUM(co.valor::numeric), 0)::float AS receita
     FROM compras co
     JOIN produtos p ON p.id = co.produto_id
-    WHERE co.status = 'COMPLETE'
+    WHERE co.status IN ('COMPLETE', 'APPROVED')
       AND COALESCE(p.tipo, 'entrada') = $1
       AND co.data_compra::date >= $2::date
       AND co.data_compra::date <= $3::date
@@ -112,7 +112,7 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
           COUNT(*)::int                              AS total_compras,
           COALESCE(AVG(valor::numeric), 0)::float   AS ticket_medio
         FROM compras
-        WHERE status = 'COMPLETE'
+        WHERE status IN ('COMPLETE', 'APPROVED')
           AND valor IS NOT NULL
           AND data_compra::date >= $1::date
           AND data_compra::date <= $2::date
@@ -128,7 +128,7 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
           COALESCE(SUM(co.valor::numeric), 0)::float AS receita
         FROM produtos p
         JOIN compras co ON co.produto_id = p.id
-          AND co.status = 'COMPLETE'
+          AND co.status IN ('COMPLETE', 'APPROVED')
           AND co.valor IS NOT NULL
           AND co.data_compra::date >= $1::date
           AND co.data_compra::date <= $2::date
@@ -145,7 +145,7 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
             WHEN EXISTS (
               SELECT 1 FROM compras co2
               JOIN produtos p2 ON p2.id = co2.produto_id
-              WHERE co2.cliente_id = c.id AND p2.tipo = 'principal' AND co2.status = 'COMPLETE'
+              WHERE co2.cliente_id = c.id AND p2.tipo = 'principal' AND co2.status IN ('COMPLETE', 'APPROVED')
             ) THEN c.id END)::int AS clientes_com_principal
         FROM clientes c
       `),
@@ -183,7 +183,7 @@ dashboardRouter.get('/funil', async (req: Request, res: Response) => {
         COUNT(DISTINCT co.cliente_id)::int         AS total_clientes,
         COALESCE(SUM(co.valor::numeric), 0)::float AS receita
       FROM compras co
-      WHERE co.status = 'COMPLETE'
+      WHERE co.status IN ('COMPLETE', 'APPROVED')
         AND co.is_order_bump = true
         AND co.data_compra::date >= $1::date
         AND co.data_compra::date <= $2::date
@@ -237,7 +237,7 @@ dashboardRouter.get('/evolucao', async (req: Request, res: Response) => {
       FROM serie s
       LEFT JOIN compras co
         ON co.data_compra::date = s.data
-        AND co.status = 'COMPLETE'
+        AND co.status IN ('COMPLETE', 'APPROVED')
         AND co.valor IS NOT NULL
       GROUP BY s.data
       ORDER BY s.data ASC

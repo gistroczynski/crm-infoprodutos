@@ -17,7 +17,7 @@ debugRouter.get('/sync-datas', async (_req: Request, res: Response) => {
           p.nome AS produto
         FROM compras co
         JOIN produtos p ON p.id = co.produto_id
-        WHERE co.status = 'COMPLETE'
+        WHERE co.status IN ('COMPLETE', 'APPROVED')
         ORDER BY co.data_compra DESC
         LIMIT 1
       `),
@@ -30,7 +30,7 @@ debugRouter.get('/sync-datas', async (_req: Request, res: Response) => {
           COUNT(DISTINCT co.id)::int       AS total_compras,
           COUNT(DISTINCT co.cliente_id)::int AS total_clientes
         FROM compras co
-        WHERE co.status = 'COMPLETE'
+        WHERE co.status IN ('COMPLETE', 'APPROVED')
       `),
     ])
 
@@ -295,7 +295,7 @@ debugRouter.get('/analise-produtos', async (_req: Request, res: Response) => {
             '{}'
           )                                                                    AS purchase_types
         FROM produtos p
-        LEFT JOIN compras co ON co.produto_id = p.id AND co.status = 'COMPLETE'
+        LEFT JOIN compras co ON co.produto_id = p.id AND co.status IN ('COMPLETE', 'APPROVED')
         GROUP BY p.id, p.nome, p.hotmart_id
         HAVING COUNT(co.id) > 0
         ORDER BY total_compras DESC
@@ -318,7 +318,7 @@ debugRouter.get('/analise-produtos', async (_req: Request, res: Response) => {
           STRING_AGG(DISTINCT purchase_type, ', ') FILTER (WHERE purchase_type IS NOT NULL)
                                                                      AS purchase_types
         FROM compras
-        WHERE status = 'COMPLETE'
+        WHERE status IN ('COMPLETE', 'APPROVED')
       `),
     ])
 
@@ -377,7 +377,7 @@ debugRouter.get('/identificar-order-bumps', async (req: Request, res: Response) 
       JOIN compras co2
         ON co1.cliente_id = co2.cliente_id
         AND co1.id < co2.id
-        AND co1.status = 'COMPLETE' AND co2.status = 'COMPLETE'
+        AND co1.status IN ('COMPLETE', 'APPROVED') AND co2.status IN ('COMPLETE', 'APPROVED')
         AND ABS(EXTRACT(EPOCH FROM (co1.data_compra - co2.data_compra))) <= $1
       JOIN produtos p1 ON p1.id = co1.produto_id
       JOIN produtos p2 ON p2.id = co2.produto_id
@@ -433,7 +433,7 @@ debugRouter.post('/marcar-order-bumps', async (req: Request, res: Response) => {
         JOIN compras co2
           ON co1.cliente_id = co2.cliente_id
           AND co1.id < co2.id
-          AND co1.status = 'COMPLETE' AND co2.status = 'COMPLETE'
+          AND co1.status IN ('COMPLETE', 'APPROVED') AND co2.status IN ('COMPLETE', 'APPROVED')
           AND ABS(EXTRACT(EPOCH FROM (co1.data_compra - co2.data_compra))) <= $1
       )
     `, [janelaSeg])
@@ -448,7 +448,7 @@ debugRouter.post('/marcar-order-bumps', async (req: Request, res: Response) => {
         )::float AS pct
       FROM compras co
       JOIN produtos p ON p.id = co.produto_id
-      WHERE co.status = 'COMPLETE'
+      WHERE co.status IN ('COMPLETE', 'APPROVED')
       GROUP BY co.produto_id, p.nome
       HAVING ROUND(
         COUNT(CASE WHEN co.is_order_bump = true THEN 1 END)::numeric / COUNT(co.id) * 100, 1
@@ -498,7 +498,7 @@ debugRouter.get('/compras-sample', async (_req: Request, res: Response) => {
         co.data_compra::date::text AS data_compra
       FROM compras co
       JOIN produtos p ON p.id = co.produto_id
-      WHERE co.status = 'COMPLETE'
+      WHERE co.status IN ('COMPLETE', 'APPROVED')
       ORDER BY co.data_compra DESC
       LIMIT 10
     `)

@@ -55,11 +55,11 @@ clientesRouter.get('/', async (req: Request, res: Response) => {
         COALESCE(ls.prioridade, 'baixa') AS prioridade,
         COALESCE(sc.status, 'novo')      AS status,
 
-        COUNT(co.id)    FILTER (WHERE co.status = 'COMPLETE')::int   AS total_compras,
-        COALESCE(SUM(co.valor::numeric) FILTER (WHERE co.status = 'COMPLETE'), 0)::float
+        COUNT(co.id)    FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED'))::int   AS total_compras,
+        COALESCE(SUM(co.valor::numeric) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')), 0)::float
                                                                       AS total_gasto,
-        MAX(co.data_compra) FILTER (WHERE co.status = 'COMPLETE')    AS ultima_compra,
-        (CURRENT_DATE - MAX(co.data_compra::date) FILTER (WHERE co.status = 'COMPLETE'))::int
+        MAX(co.data_compra) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED'))    AS ultima_compra,
+        (CURRENT_DATE - MAX(co.data_compra::date) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')))::int
                                                                       AS dias_desde_ultima_compra,
 
         -- Nome do último produto comprado
@@ -67,7 +67,7 @@ clientesRouter.get('/', async (req: Request, res: Response) => {
           SELECT p2.nome
           FROM compras co2
           JOIN produtos p2 ON p2.id = co2.produto_id
-          WHERE co2.cliente_id = c.id AND co2.status = 'COMPLETE'
+          WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'APPROVED')
           ORDER BY co2.data_compra DESC
           LIMIT 1
         ) AS ultimo_produto
@@ -154,7 +154,7 @@ clientesRouter.get('/:id', async (req: Request, res: Response) => {
           (CURRENT_DATE - co.data_compra::date)::int           AS dias_atras
         FROM compras co
         JOIN produtos p ON p.id = co.produto_id
-        WHERE co.cliente_id = $1 AND co.status = 'COMPLETE'
+        WHERE co.cliente_id = $1 AND co.status IN ('COMPLETE', 'APPROVED')
         ORDER BY co.data_compra DESC
       `, [id]),
     ])

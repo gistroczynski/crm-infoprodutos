@@ -13,7 +13,7 @@ function buildWhere(
   startAt = 1,
 ) {
   const conds: string[] = [
-    `co.status = 'COMPLETE'`,
+    `co.status IN ('COMPLETE', 'APPROVED')`,
     `co.data_compra >= $${startAt}::date`,
     `co.data_compra <  ($${startAt + 1}::date + INTERVAL '1 day')`,
   ]
@@ -168,7 +168,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           co.valor::float                    AS valor,
           co.data_compra
         ${FROM_JOIN}
-        WHERE co.status = 'COMPLETE'
+        WHERE co.status IN ('COMPLETE', 'APPROVED')
           AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
         ORDER BY co.data_compra DESC
       `),
@@ -181,7 +181,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
                THEN (SUM(co.valor::numeric) / COUNT(*))::text
                ELSE '0' END                        AS ticket
         ${FROM_JOIN}
-        WHERE co.status = 'COMPLETE'
+        WHERE co.status IN ('COMPLETE', 'APPROVED')
           AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
       `),
 
@@ -190,7 +190,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           COUNT(*)::text                             AS total,
           COALESCE(SUM(co.valor::numeric), 0)::text AS receita
         ${FROM_JOIN}
-        WHERE co.status = 'COMPLETE'
+        WHERE co.status IN ('COMPLETE', 'APPROVED')
           AND ${DATA_BRT('co.data_compra')} = ${ONTEM_BRT}
       `),
 
@@ -200,7 +200,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           COUNT(*)::text                             AS quantidade,
           COALESCE(SUM(co.valor::numeric), 0)::text AS receita
         ${FROM_JOIN}
-        WHERE co.status = 'COMPLETE'
+        WHERE co.status IN ('COMPLETE', 'APPROVED')
           AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
         GROUP BY p.nome
         ORDER BY COUNT(*) DESC
@@ -258,7 +258,7 @@ vendasRouter.get('/resumo-diario', async (req: Request, res: Response) => {
         COUNT(*)::text                          AS quantidade,
         COALESCE(SUM(co.valor::numeric), 0)::text AS receita
       ${FROM_JOIN}
-      WHERE co.status = 'COMPLETE'
+      WHERE co.status IN ('COMPLETE', 'APPROVED')
         AND co.data_compra >= $1::date
         AND co.data_compra <  ($2::date + INTERVAL '1 day')
       GROUP BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date, p.nome

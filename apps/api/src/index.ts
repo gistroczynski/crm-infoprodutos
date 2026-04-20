@@ -63,20 +63,23 @@ app.use(limiter)
 
 // ── CORS ───────────────────────────────────────────────────────────────────
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  process.env.FRONTEND_URL,
-].filter((o): o is string => Boolean(o))
-
 app.use(cors({
-  origin: (origin, callback) => {
-    // Permite chamadas sem origin (ex: curl, Postman, webhooks)
-    if (!origin) return callback(null, true)
-    if (allowedOrigins.includes(origin)) return callback(null, true)
-    callback(new Error(`CORS: origem não permitida — ${origin}`))
+  origin: function(origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'https://crm-infoprodutos-web.vercel.app',
+      process.env.FRONTEND_URL,
+    ].filter(Boolean)
+
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true)
+    } else {
+      callback(new Error('Not allowed by CORS'))
+    }
   },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }))
 
 // ── Middlewares ────────────────────────────────────────────────────────────

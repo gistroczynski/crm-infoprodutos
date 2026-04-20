@@ -274,6 +274,19 @@ export interface ResumoDiarioItem {
   produtos: { nome: string; quantidade: number; receita: number }[]
 }
 
+export const syncApi = {
+  manual: () =>
+    api.post<{ success: boolean; message: string }>('/api/sync/manual').then(r => r.data),
+
+  completo: (dias = 60) =>
+    api.post<{ success: boolean; message: string; desde: string }>(
+      '/api/sync/completo', { dias }
+    ).then(r => r.data),
+
+  status: () =>
+    api.get<{ ultima_sync?: string | null; sync_em_andamento: boolean }>('/api/sync/status').then(r => r.data),
+}
+
 export const vendasApi = {
   list: (params?: {
     inicio?: string; fim?: string

@@ -4,6 +4,69 @@ import { hotmartService } from '../services/hotmart'
 
 export const debugRouter = Router()
 
+// ── GET /api/debug/sync-datas ──────────────────────────────────────────────
+// Diagnóstico: mostra a última compra no banco, a última sync e o gap atual.
+// Útil para entender por que vendas recentes não aparecem.
+debugRouter.get('/sync-datas', async (_req: Request, res: Response) => {
+  try {
+    const [ultimaCompraRow, ultimaSyncRow, distRow] = await Promise.all([
+      queryOne<{ data: string; transaction_id: string; produto: string }>(`
+        SELECT
+          co.data_compra::text  AS data,
+          co.hotmart_transaction_id AS transaction_id,
+          p.nome AS produto
+        FROM compras co
+        JOIN produtos p ON p.id = co.produto_id
+        WHERE co.status = 'COMPLETE'
+        ORDER BY co.data_compra DESC
+        LIMIT 1
+      `),
+      queryOne<{ valor: string }>(`
+        SELECT valor FROM configuracoes WHERE chave = 'ultima_sync'
+      `),
+      queryOne<{ dias: number; total_compras: number; total_clientes: number }>(`
+        SELECT
+          EXTRACT(EPOCH FROM (NOW() - MAX(co.data_compra)))::int / 86400 AS dias,
+          COUNT(DISTINCT co.id)::int       AS total_compras,
+          COUNT(DISTINCT co.cliente_id)::int AS total_clientes
+        FROM compras co
+        WHERE co.status = 'COMPLETE'
+      `),
+    ])
+
+    const ultimaCompraData = ultimaCompraRow?.data ? new Date(ultimaCompraRow.data) : null
+    const ultimaSyncData   = ultimaSyncRow?.valor  ? new Date(ultimaSyncRow.valor)  : null
+    const agora            = new Date()
+
+    // Calcula qual seria a janela de busca do próximo sync incremental
+    const proximoDesde = ultimaCompraData
+      ? new Date(ultimaCompraData.getTime() - 1 * 24 * 60 * 60 * 1000)
+      : null
+
+    res.json({
+      data_atual:             agora.toISOString(),
+      ultima_compra_no_banco: ultimaCompraRow?.data ?? null,
+      ultima_compra_produto:  ultimaCompraRow?.produto ?? null,
+      ultima_compra_transaction: ultimaCompraRow?.transaction_id ?? null,
+      dias_sem_nova_compra:   distRow?.dias ?? null,
+      total_compras_banco:    distRow?.total_compras ?? 0,
+      total_clientes_banco:   distRow?.total_clientes ?? 0,
+      ultima_sync_rodou_em:   ultimaSyncRow?.valor ?? null,
+      proximo_sync_incremental_desde: proximoDesde?.toISOString().slice(0, 10) ?? null,
+      diagnostico: {
+        problema_detectado: distRow != null && distRow.dias > 3
+          ? `⚠️ Última venda há ${distRow.dias} dias — possível gap no sync`
+          : '✓ Sync aparenta estar atualizado',
+        recomendacao: distRow != null && distRow.dias > 3
+          ? 'Execute POST /api/sync/completo para recuperar vendas dos últimos 60 dias'
+          : null,
+      },
+    })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+})
+
 // ── GET /api/debug/transacoes-raw ─────────────────────────────────────────
 // 5 últimas transações sem filtro de status — payload completo para análise
 debugRouter.get('/transacoes-raw', async (req: Request, res: Response) => {

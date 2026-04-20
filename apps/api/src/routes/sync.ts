@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { executarSync } from '../jobs/sync'
-import { buscarStatusSync } from '../db/queries'
+import { buscarStatusSync, buscarDataUltimaCompra } from '../db/queries'
 import { hotmartService } from '../services/hotmart'
 
 export const syncRouter = Router()
@@ -33,6 +33,37 @@ syncRouter.post('/manual', async (req: Request, res: Response) => {
     console.log('[Sync] Resultado:', JSON.stringify(resultado, null, 2))
   } catch (err) {
     console.error('[Sync] Erro inesperado no job manual:', err)
+  } finally {
+    syncEmAndamento = false
+  }
+})
+
+// POST /api/sync/completo
+// Força busca dos últimos 60 dias independente do que está no banco
+// Útil para recuperar vendas perdidas por falha de sync
+syncRouter.post('/completo', async (req: Request, res: Response) => {
+  if (syncEmAndamento) {
+    return res.status(409).json({
+      success: false,
+      error: 'Sincronização já está em andamento.',
+    })
+  }
+
+  const dias = Math.min(Number(req.body?.dias ?? 60), 365)
+  const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000)
+  syncEmAndamento = true
+
+  res.json({
+    success: true,
+    message: `Sync completo iniciado — buscando vendas dos últimos ${dias} dias (desde ${desde.toISOString().slice(0, 10)}).`,
+    desde: desde.toISOString().slice(0, 10),
+  })
+
+  try {
+    const resultado = await executarSync(false, desde)
+    console.log('[Sync/Completo] Resultado:', JSON.stringify(resultado, null, 2))
+  } catch (err) {
+    console.error('[Sync/Completo] Erro inesperado:', err)
   } finally {
     syncEmAndamento = false
   }

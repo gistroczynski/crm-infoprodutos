@@ -175,6 +175,19 @@ export async function buscarUltimaSync(): Promise<string | null> {
   return row?.valor ?? null
 }
 
+/**
+ * Retorna a data da compra mais recente no banco (status COMPLETE).
+ * Usado como âncora do sync incremental — mais confiável que a data
+ * em que o sync rodou pela última vez, pois evita "avançar" a janela
+ * de busca mesmo quando o resultado foi vazio.
+ */
+export async function buscarDataUltimaCompra(): Promise<Date | null> {
+  const row = await queryOne<{ data_compra: string }>(
+    `SELECT MAX(data_compra)::text AS data_compra FROM compras WHERE status = 'COMPLETE'`
+  )
+  return row?.data_compra ? new Date(row.data_compra) : null
+}
+
 export async function salvarUltimaSync(timestamp: string) {
   await pool.query(`
     INSERT INTO configuracoes (chave, valor, updated_at)

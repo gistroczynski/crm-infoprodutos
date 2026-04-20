@@ -6,6 +6,7 @@ import {
   buscarProdutoPorHotmartId,
   salvarUltimaSync,
   buscarUltimaSync,
+  buscarDataUltimaCompra,
 } from '../db/queries'
 import { reclassificarTodasCompras, lerValorMaximoOB } from '../services/classificarOrderBump'
 
@@ -69,19 +70,38 @@ async function processarVendas(
 
 // ── Sync principal ─────────────────────────────────────────────────────────
 
-export async function executarSync(forceFull = false): Promise<SyncResult> {
+/**
+ * @param forceFull  true → sync histórico desde jan/2023
+ * @param desdeOverride  data de início customizada (ex: para sync de 60 dias)
+ */
+export async function executarSync(forceFull = false, desdeOverride?: Date): Promise<SyncResult> {
   const inicio = new Date()
 
-  // Decide o modo: completo (histórico) ou incremental (desde última sync)
+  // Decide o modo
   const ultimaSync = await buscarUltimaSync()
   const modo: 'completo' | 'incremental' =
-    forceFull || !ultimaSync ? 'completo' : 'incremental'
+    forceFull || desdeOverride || !ultimaSync ? 'completo' : 'incremental'
 
-  // Para incremental, busca desde 2 dias antes da última sync (margem de segurança)
-  // Para completo, busca desde jan/2023
-  const desde = modo === 'incremental'
-    ? new Date(new Date(ultimaSync!).getTime() - 2 * 24 * 60 * 60 * 1000)
-    : new Date('2023-01-01T00:00:00Z')
+  let desde: Date
+
+  if (desdeOverride) {
+    // Janela customizada (ex: sync completo de 60 dias)
+    desde = desdeOverride
+  } else if (modo === 'incremental') {
+    // Âncora = data da ÚLTIMA COMPRA no banco (não data do último sync).
+    // Isso evita que a janela "avance" quando o sync roda mas não encontra vendas,
+    // o que causaria um gap crescente entre banco e Hotmart.
+    const ultimaCompra = await buscarDataUltimaCompra()
+    if (ultimaCompra) {
+      // Recua 1 dia da última compra para garantir que não perdemos nada por timezone
+      desde = new Date(ultimaCompra.getTime() - 1 * 24 * 60 * 60 * 1000)
+    } else {
+      // Banco vazio — faz sync completo desde jan/2023
+      desde = new Date('2023-01-01T00:00:00Z')
+    }
+  } else {
+    desde = new Date('2023-01-01T00:00:00Z')
+  }
 
   console.log(`\n[Sync] ▶ Iniciando sync ${modo.toUpperCase()} desde ${desde.toISOString().slice(0, 10)} — ${inicio.toISOString()}`)
 

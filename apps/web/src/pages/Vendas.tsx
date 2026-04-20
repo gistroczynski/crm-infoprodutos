@@ -10,7 +10,7 @@ import {
 } from '../services/api'
 import type { Produto } from '@crm/shared'
 import { useToast } from '../hooks/useToast'
-import api from '../services/api'
+import { syncApi } from '../services/api'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -133,9 +133,10 @@ export default function Vendas() {
   const [porDia,      setPorDia]      = useState<{ data: string; quantidade: number; receita: number }[]>([])
   const [hoje,        setHoje]        = useState<VendasHojeResponse | null>(null)
   const [produtos,    setProdutos]    = useState<Produto[]>([])
-  const [loading,     setLoading]     = useState(true)
-  const [syncing,     setSyncing]     = useState(false)
-  const [avisoConexao, setAvisoConexao] = useState(false)
+  const [loading,       setLoading]       = useState(true)
+  const [syncing,       setSyncing]       = useState(false)
+  const [syncingFull,   setSyncingFull]   = useState(false)
+  const [avisoConexao,  setAvisoConexao]  = useState(false)
 
   // Ref estável para toast (evita que toast no dep array cause loop de re-renders)
   const toastRef = useRef(toast)
@@ -232,31 +233,36 @@ export default function Vendas() {
     setPage(1)
   }
 
-  // ── Sincronizar — aguarda e reporta novas vendas ───────────────────────────
+  // ── Helpers de sync ───────────────────────────────────────────────────────
+
+  async function recarregarAposSyncMs(ms: number) {
+    await new Promise(r => setTimeout(r, ms))
+    const totalAntes = totalVendas
+    const [dados] = await Promise.all([
+      vendasApi.list({
+        inicio: dataInicio, fim: dataFim, page, limit: 50,
+        produto_id: produtoId || undefined,
+        busca:      busca    || undefined,
+      }),
+      vendasApi.hoje().then(setHoje).catch(() => {}),
+    ])
+    setVendas(dados.vendas)
+    setTotalVendas(dados.total)
+    setTotalPages(dados.total_pages)
+    setPorDia(dados.resumo.por_dia)
+    erroJaMostradoRef.current = false
+    setAvisoConexao(false)
+    return dados.total - totalAntes
+  }
+
+  // ── Sync incremental ──────────────────────────────────────────────────────
 
   async function sincronizar() {
     setSyncing(true)
-    const totalAntes = totalVendas
     try {
-      await api.post('/api/sync/manual')
+      await syncApi.manual()
       toastRef.current.info('Sincronizando com Hotmart...')
-      // Aguarda o sync processar no servidor (~8s)
-      await new Promise(r => setTimeout(r, 8000))
-      const [dados] = await Promise.all([
-        vendasApi.list({
-          inicio: dataInicio, fim: dataFim, page, limit: 50,
-          produto_id: produtoId || undefined,
-          busca:      busca    || undefined,
-        }),
-        vendasApi.hoje().then(setHoje).catch(() => {}),
-      ])
-      setVendas(dados.vendas)
-      setTotalVendas(dados.total)
-      setTotalPages(dados.total_pages)
-      setPorDia(dados.resumo.por_dia)
-      erroJaMostradoRef.current = false
-      setAvisoConexao(false)
-      const novas = dados.total - totalAntes
+      const novas = await recarregarAposSyncMs(8000)
       if (novas > 0) {
         toastRef.current.success(
           `Sincronizado! ${novas} nova${novas !== 1 ? 's vendas encontradas' : ' venda encontrada'}.`
@@ -268,6 +274,29 @@ export default function Vendas() {
       toastRef.current.error('Falha ao iniciar sincronização.')
     } finally {
       setSyncing(false)
+    }
+  }
+
+  // ── Sync completo (60 dias) ───────────────────────────────────────────────
+
+  async function sincronizarCompleto() {
+    setSyncingFull(true)
+    try {
+      const resp = await syncApi.completo(60)
+      toastRef.current.info(`Sync completo iniciado — buscando desde ${resp.desde}. Pode levar alguns minutos...`)
+      // Aguarda mais tempo pois é uma operação mais demorada
+      const novas = await recarregarAposSyncMs(20000)
+      if (novas > 0) {
+        toastRef.current.success(
+          `Sync completo! ${novas} nova${novas !== 1 ? 's vendas recuperadas' : ' venda recuperada'}.`
+        )
+      } else {
+        toastRef.current.success('Sync completo! Dados atualizados (nenhuma venda nova no período exibido).')
+      }
+    } catch {
+      toastRef.current.error('Falha ao iniciar sync completo.')
+    } finally {
+      setSyncingFull(false)
     }
   }
 
@@ -339,7 +368,7 @@ export default function Vendas() {
 
           <button
             onClick={sincronizar}
-            disabled={syncing}
+            disabled={syncing || syncingFull}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
           >
             <svg
@@ -350,6 +379,22 @@ export default function Vendas() {
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             Sincronizar
+          </button>
+
+          <button
+            onClick={sincronizarCompleto}
+            disabled={syncing || syncingFull}
+            title="Busca vendas dos últimos 60 dias — use quando há gap no histórico"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-orange-300 text-orange-700 rounded-lg hover:bg-orange-50 disabled:opacity-50 transition-colors"
+          >
+            <svg
+              className={`w-3.5 h-3.5 ${syncingFull ? 'animate-spin' : ''}`}
+              fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {syncingFull ? 'Buscando...' : 'Sync 60 dias'}
           </button>
         </div>
       </div>

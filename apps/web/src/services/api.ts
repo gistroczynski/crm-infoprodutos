@@ -285,6 +285,11 @@ export const syncApi = {
 
   status: () =>
     api.get<{ ultima_sync?: string | null; sync_em_andamento: boolean }>('/api/sync/status').then(r => r.data),
+
+  recuperarPeriodo: (inicio: string, fim: string) =>
+    api.post<{ success: boolean; message: string; periodo: { inicio: string; fim: string } }>(
+      '/api/sync/recuperar-periodo', { inicio, fim }
+    ).then(r => r.data),
 }
 
 export const vendasApi = {

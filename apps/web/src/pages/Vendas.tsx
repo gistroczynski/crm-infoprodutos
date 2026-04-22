@@ -134,9 +134,13 @@ export default function Vendas() {
   const [hoje,        setHoje]        = useState<VendasHojeResponse | null>(null)
   const [produtos,    setProdutos]    = useState<Produto[]>([])
   const [loading,       setLoading]       = useState(true)
-  const [syncing,       setSyncing]       = useState(false)
-  const [syncingFull,   setSyncingFull]   = useState(false)
-  const [avisoConexao,  setAvisoConexao]  = useState(false)
+  const [syncing,           setSyncing]           = useState(false)
+  const [syncingFull,       setSyncingFull]       = useState(false)
+  const [avisoConexao,      setAvisoConexao]      = useState(false)
+  const [modalRecuperacao,  setModalRecuperacao]  = useState(false)
+  const [recuperandoPeriodo, setRecuperandoPeriodo] = useState(false)
+  const [recInicio,         setRecInicio]         = useState('')
+  const [recFim,            setRecFim]            = useState('')
 
   // Ref estável para toast (evita que toast no dep array cause loop de re-renders)
   const toastRef = useRef(toast)
@@ -300,6 +304,33 @@ export default function Vendas() {
     }
   }
 
+  // ── Recuperar período específico ──────────────────────────────────────────
+
+  async function recuperarPeriodo() {
+    if (!recInicio || !recFim) {
+      toastRef.current.error('Selecione as datas de início e fim.')
+      return
+    }
+    setRecuperandoPeriodo(true)
+    try {
+      await syncApi.recuperarPeriodo(recInicio, recFim)
+      toastRef.current.info(`Recuperando ${recInicio} → ${recFim}. Pode levar alguns minutos...`)
+      setModalRecuperacao(false)
+      const novas = await recarregarAposSyncMs(25000)
+      if (novas > 0) {
+        toastRef.current.success(
+          `Recuperado! ${novas} nova${novas !== 1 ? 's vendas encontradas' : ' venda encontrada'}.`
+        )
+      } else {
+        toastRef.current.success('Recuperação concluída. Nenhuma venda nova no período exibido.')
+      }
+    } catch {
+      toastRef.current.error('Falha ao iniciar recuperação.')
+    } finally {
+      setRecuperandoPeriodo(false)
+    }
+  }
+
   function onBuscaChange(v: string) {
     setBusca(v)
     setPage(1)
@@ -383,7 +414,7 @@ export default function Vendas() {
 
           <button
             onClick={sincronizarCompleto}
-            disabled={syncing || syncingFull}
+            disabled={syncing || syncingFull || recuperandoPeriodo}
             title="Busca vendas dos últimos 60 dias — use quando há gap no histórico"
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-orange-300 text-orange-700 rounded-lg hover:bg-orange-50 disabled:opacity-50 transition-colors"
           >
@@ -396,8 +427,70 @@ export default function Vendas() {
             </svg>
             {syncingFull ? 'Buscando...' : 'Sync 60 dias'}
           </button>
+
+          <button
+            onClick={() => setModalRecuperacao(true)}
+            disabled={syncing || syncingFull || recuperandoPeriodo}
+            title="Recupera vendas de um período específico — use para preencher gaps pontuais"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-red-300 text-red-700 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M9 12h6m-3-3v6m9-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Recuperar período
+          </button>
         </div>
       </div>
+
+      {/* ── Modal de recuperação de período ──────────────────────────────────── */}
+      {modalRecuperacao && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+            <h2 className="text-base font-semibold text-gray-900 mb-1">Recuperar período específico</h2>
+            <p className="text-xs text-gray-500 mb-4">
+              Busca todas as vendas da Hotmart no intervalo selecionado e atualiza o banco.
+              Útil para preencher gaps de dias faltantes.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Data início</label>
+                <input
+                  type="date"
+                  value={recInicio}
+                  onChange={e => setRecInicio(e.target.value)}
+                  className="w-full text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Data fim</label>
+                <input
+                  type="date"
+                  value={recFim}
+                  onChange={e => setRecFim(e.target.value)}
+                  className="w-full text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={() => setModalRecuperacao(false)}
+                disabled={recuperandoPeriodo}
+                className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={recuperarPeriodo}
+                disabled={recuperandoPeriodo || !recInicio || !recFim}
+                className="flex-1 px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {recuperandoPeriodo ? 'Recuperando...' : 'Recuperar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── SEÇÃO 1: Cards do dia (sempre Hoje) ────────────────────────────── */}
       <div className="grid grid-cols-4 gap-4">

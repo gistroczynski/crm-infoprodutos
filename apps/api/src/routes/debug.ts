@@ -475,6 +475,103 @@ debugRouter.post('/marcar-order-bumps', async (req: Request, res: Response) => {
   }
 })
 
+// ── GET /api/debug/hotmart-paginas ────────────────────────────────────────
+// Inspeciona todas as páginas da API da Hotmart para um período específico.
+// Query params: ?inicio=2026-04-13&fim=2026-04-18
+// Retorna: quantas páginas existem e quais datas cada página contém.
+debugRouter.get('/hotmart-paginas', async (req: Request, res: Response) => {
+  try {
+    const inicioStr = (req.query.inicio as string) ?? ''
+    const fimStr    = (req.query.fim    as string) ?? ''
+
+    if (!inicioStr || !fimStr) {
+      return res.status(400).json({ error: 'Parâmetros inicio e fim são obrigatórios (ex: ?inicio=2026-04-13&fim=2026-04-18)' })
+    }
+
+    const startMs = new Date(inicioStr + 'T00:00:00.000Z').getTime()
+    const endMs   = new Date(fimStr   + 'T23:59:59.999Z').getTime()
+
+    const statuses = ['COMPLETE', 'APPROVED'] as const
+    const resultado: Record<string, unknown> = {}
+
+    for (const status of statuses) {
+      const paginas: Array<{
+        pagina: number
+        quantidade_itens: number
+        has_next_page: boolean
+        total_results: number | null
+        datas_das_vendas: string[]
+        data_mais_antiga: string | null
+        data_mais_recente: string | null
+      }> = []
+
+      let pagina = 0
+      let hasNextPage = true
+
+      while (hasNextPage) {
+        const r = await hotmartService.rawRequest('/payments/api/v1/sales/history', {
+          max_results:        50,
+          transaction_status: status,
+          start_date:         startMs,
+          end_date:           endMs,
+          page:               pagina,
+        })
+
+        const body = r.body as {
+          items?: Array<{ purchase?: { order_date?: number } }>
+          page_info?: { has_next_page?: boolean; total_results?: number }
+        }
+
+        const items       = body?.items ?? []
+        hasNextPage       = body?.page_info?.has_next_page ?? false
+        const totalResults = body?.page_info?.total_results ?? null
+
+        const datas = items
+          .map(i => i.purchase?.order_date ? new Date(i.purchase.order_date).toISOString().slice(0, 10) : 'sem_data')
+          .sort()
+
+        const datasUnicas = [...new Set(datas)].sort()
+
+        paginas.push({
+          pagina,
+          quantidade_itens:  items.length,
+          has_next_page:     hasNextPage,
+          total_results:     totalResults,
+          datas_das_vendas:  datasUnicas,
+          data_mais_antiga:  datas.length ? datas[0] : null,
+          data_mais_recente: datas.length ? datas[datas.length - 1] : null,
+        })
+
+        console.log(
+          `[Debug/Paginas] ${status} pág ${pagina}: ${items.length} itens | datas: ${datasUnicas.join(', ')} | has_next: ${hasNextPage}`
+        )
+
+        pagina++
+        if (pagina > 500) break
+        if (hasNextPage) await new Promise(r => setTimeout(r, 300))
+      }
+
+      const todasDatas = [...new Set(paginas.flatMap(p => p.datas_das_vendas))].sort()
+
+      resultado[status] = {
+        total_paginas:       paginas.length,
+        total_itens:         paginas.reduce((s, p) => s + p.quantidade_itens, 0),
+        todas_datas_encontradas: todasDatas,
+        paginas,
+      }
+    }
+
+    res.json({
+      success: true,
+      periodo: { inicio: inicioStr, fim: fimStr, start_ms: startMs, end_ms: endMs },
+      resultado,
+    })
+  } catch (err) {
+    console.error('[Debug/Paginas] Erro:', err)
+    res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
 // ── GET /api/debug/compras-sample ─────────────────────────────────────────
 // Mostra as 10 compras mais recentes com todos os campos de order bump
 debugRouter.get('/compras-sample', async (_req: Request, res: Response) => {

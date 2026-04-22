@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express'
 import { executarSync } from '../jobs/sync'
 import { buscarStatusSync, buscarDataUltimaCompra } from '../db/queries'
 import { hotmartService } from '../services/hotmart'
+import { upsertCliente, upsertProduto, upsertCompra, buscarProdutoPorHotmartId } from '../db/queries'
+import { reclassificarTodasCompras, lerValorMaximoOB } from '../services/classificarOrderBump'
 
 export const syncRouter = Router()
 
@@ -76,6 +78,92 @@ syncRouter.get('/status', async (_req: Request, res: Response) => {
     res.json({ success: true, ...status, sync_em_andamento: syncEmAndamento })
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
+// POST /api/sync/recuperar-periodo
+// Body: { inicio: "2026-04-13", fim: "2026-04-19" }
+// Busca vendas de um período específico na Hotmart e faz upsert no banco.
+// Útil para recuperar gaps manualmente sem refazer o sync completo.
+syncRouter.post('/recuperar-periodo', async (req: Request, res: Response) => {
+  if (syncEmAndamento) {
+    return res.status(409).json({
+      success: false,
+      error: 'Sincronização já está em andamento. Tente novamente em instantes.',
+    })
+  }
+
+  const { inicio, fim } = req.body ?? {}
+
+  if (!inicio || !fim) {
+    return res.status(400).json({
+      success: false,
+      error: 'Body deve conter { inicio: "YYYY-MM-DD", fim: "YYYY-MM-DD" }',
+    })
+  }
+
+  const startMs = new Date(inicio + 'T00:00:00.000Z').getTime()
+  const endMs   = new Date(fim   + 'T23:59:59.999Z').getTime()
+
+  if (isNaN(startMs) || isNaN(endMs) || startMs > endMs) {
+    return res.status(400).json({ success: false, error: 'Datas inválidas ou invertidas.' })
+  }
+
+  syncEmAndamento = true
+
+  res.json({
+    success: true,
+    message: `Recuperação iniciada para o período ${inicio} → ${fim}. Aguarde alguns instantes.`,
+    periodo: { inicio, fim },
+  })
+
+  try {
+    console.log(`\n[Sync/Recuperar] ▶ Buscando vendas de ${inicio} → ${fim}`)
+    const vendas = await hotmartService.buscarVendasPorPeriodo(startMs, endMs)
+    console.log(`[Sync/Recuperar] ${vendas.length} vendas encontradas`)
+
+    let novas = 0, atualizadas = 0, erros = 0
+
+    for (const venda of vendas) {
+      try {
+        const { cliente: clienteDados, produto: produtoDados, compra: compraDados } =
+          hotmartService.mapearVenda(venda)
+
+        const { id: clienteId }  = await upsertCliente(clienteDados)
+
+        let produtoId: string
+        const produtoExistente = await buscarProdutoPorHotmartId(produtoDados.hotmart_id)
+        if (produtoExistente) {
+          produtoId = produtoExistente.id
+        } else {
+          const { id } = await upsertProduto(produtoDados)
+          produtoId = id
+        }
+
+        const { novo } = await upsertCompra({ ...compraDados, cliente_id: clienteId, produto_id: produtoId })
+        if (novo) novas++
+        else atualizadas++
+      } catch (err) {
+        erros++
+        console.error(`[Sync/Recuperar] Erro na venda ${venda.purchase.transaction}:`, err)
+      }
+    }
+
+    // Reclassifica order bumps após upsert
+    try {
+      const valorMaximoOB = await lerValorMaximoOB()
+      await reclassificarTodasCompras(valorMaximoOB)
+    } catch (err) {
+      console.error('[Sync/Recuperar] Erro ao reclassificar order bumps:', err)
+    }
+
+    console.log(
+      `[Sync/Recuperar] ✔ Concluído — novas: ${novas} | atualizadas: ${atualizadas} | erros: ${erros}`
+    )
+  } catch (err) {
+    console.error('[Sync/Recuperar] Erro inesperado:', err)
+  } finally {
+    syncEmAndamento = false
   }
 })
 

@@ -57,6 +57,7 @@ interface HotmartSalesPage {
     total_results?: number
     next_page_token?: string
     results_per_page?: number
+    has_next_page?: boolean
   }
 }
 
@@ -227,6 +228,7 @@ export class HotmartService {
 
   /**
    * Busca todas as páginas de um status específico em uma janela de datas.
+   * Usa paginação numérica (page=0,1,2…) com has_next_page como critério de parada.
    */
   private async buscarPaginasPorStatus(
     startMs: number,
@@ -235,17 +237,17 @@ export class HotmartService {
     status: 'COMPLETE' | 'APPROVED'
   ): Promise<HotmartSaleItem[]> {
     const itens: HotmartSaleItem[] = []
-    let proximaPagina: string | undefined
-    let pagina = 1
+    let pagina = 0
+    let hasNextPage = true
 
-    do {
+    while (hasNextPage) {
       const params: Record<string, string | number> = {
         max_results: 50,
         transaction_status: status,
         start_date: startMs,
         end_date: endMs,
+        page: pagina,
       }
-      if (proximaPagina) params['page_token'] = proximaPagina
 
       const data = await this.get<HotmartSalesPage>(
         '/payments/api/v1/sales/history',
@@ -254,26 +256,39 @@ export class HotmartService {
 
       const novos = data.items ?? []
       itens.push(...novos)
-      proximaPagina = data.page_info?.next_page_token
+      hasNextPage = data.page_info?.has_next_page ?? false
 
       console.log(
-        `[Hotmart] ${label}/${status} — pág ${pagina}: ${novos.length} itens | acumulado: ${itens.length}/${data.page_info?.total_results ?? '?'}`
+        `[Hotmart] ${label}/${status} — pág ${pagina}: ${novos.length} itens | acumulado: ${itens.length}/${data.page_info?.total_results ?? '?'} | has_next_page: ${hasNextPage}`
       )
 
       pagina++
-      if (proximaPagina) await sleep(300)
-    } while (proximaPagina)
+
+      // Proteção contra loop infinito
+      if (pagina > 500) {
+        console.warn(`[Hotmart] ${label}/${status} — limite de 500 páginas atingido, abortando`)
+        break
+      }
+
+      if (hasNextPage) await sleep(300)
+    }
 
     return itens
   }
 
   /**
    * Busca vendas de uma janela específica para os status COMPLETE e APPROVED.
+   * Público para permitir recuperação de período específico.
    * A API Hotmart usa APPROVED para compras recentes aprovadas (PIX, cartão) e
    * COMPLETE para transações totalmente liquidadas/antigas. Ambos representam
    * vendas válidas para o CRM.
    * Os dois status são buscados em paralelo e deduplicados por transaction_id.
    */
+  async buscarVendasPorPeriodo(startMs: number, endMs: number): Promise<HotmartSaleItem[]> {
+    const label = `${new Date(startMs).toISOString().slice(0, 10)}→${new Date(endMs).toISOString().slice(0, 10)}`
+    return this.buscarVendasPorJanela(startMs, endMs, label)
+  }
+
   async buscarVendasPorJanela(
     startMs: number,
     endMs: number,

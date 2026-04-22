@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { configuracoesApi, produtosApi } from '../services/api'
+import { configuracoesApi, produtosApi, historicoSyncApi, type HistoricoInfo } from '../services/api'
 import type { Configuracao } from '@crm/shared'
 import type { Produto } from '@crm/shared'
 import ImportarTelefones from '../components/ImportarTelefones'
@@ -287,6 +287,27 @@ function AbaComercial() {
     }
   }
 
+  const [historicoInfo, setHistoricoInfo] = useState<HistoricoInfo | null>(null)
+  const [iniciandoHistorico, setIniciandoHistorico] = useState(false)
+  const [historicoMsg, setHistoricoMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    historicoSyncApi.info().then(setHistoricoInfo).catch(() => {})
+  }, [])
+
+  async function iniciarSyncHistorico() {
+    setIniciandoHistorico(true)
+    setHistoricoMsg(null)
+    try {
+      const r = await historicoSyncApi.iniciar()
+      setHistoricoMsg(r.estimativa)
+    } catch (e: any) {
+      setHistoricoMsg(e?.response?.data?.error ?? 'Erro ao iniciar sync histórico.')
+    } finally {
+      setIniciandoHistorico(false)
+    }
+  }
+
   if (loading) return <div className="text-gray-400 text-sm">Carregando...</div>
 
   return (
@@ -322,6 +343,35 @@ function AbaComercial() {
           </div>
         </div>
       ))}
+      {/* Sync Histórico Completo */}
+      <div className="bg-white rounded-xl border border-amber-200 bg-amber-50 p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-gray-900">Sync histórico completo (desde jan/2020)</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              O sync padrão cobre apenas desde jan/2023. Use isso para recuperar clientes antigos.
+              Pode demorar 15-30 minutos — roda em background.
+            </p>
+            {historicoInfo && (
+              <div className="mt-2 flex gap-4 text-xs text-gray-500">
+                <span>Banco: <strong>{historicoInfo.banco.clientes_no_banco.toLocaleString('pt-BR')}</strong> clientes</span>
+                <span>Compras desde: <strong>{historicoInfo.banco.data_mais_antiga?.slice(0,10) ?? '—'}</strong></span>
+                <span>Janelas: <strong>{historicoInfo.sync_historico.janelas_mensais}</strong> meses</span>
+              </div>
+            )}
+            {historicoMsg && (
+              <p className="mt-2 text-xs text-amber-700 font-medium">{historicoMsg}</p>
+            )}
+          </div>
+          <button
+            onClick={iniciarSyncHistorico}
+            disabled={iniciandoHistorico || historicoInfo?.em_andamento}
+            className="flex-shrink-0 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {iniciandoHistorico ? 'Iniciando...' : 'Iniciar'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

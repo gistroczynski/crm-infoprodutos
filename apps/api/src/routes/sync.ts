@@ -4,6 +4,7 @@ import { buscarStatusSync, buscarDataUltimaCompra } from '../db/queries'
 import { hotmartService } from '../services/hotmart'
 import { upsertCliente, upsertProduto, upsertCompra, buscarProdutoPorHotmartId } from '../db/queries'
 import { reclassificarTodasCompras, lerValorMaximoOB } from '../services/classificarOrderBump'
+import { pool } from '../db'
 
 export const syncRouter = Router()
 
@@ -164,6 +165,92 @@ syncRouter.post('/recuperar-periodo', async (req: Request, res: Response) => {
     console.error('[Sync/Recuperar] Erro inesperado:', err)
   } finally {
     syncEmAndamento = false
+  }
+})
+
+// POST /api/sync/historico-completo
+// Busca TODAS as vendas desde 2020-01-01 até hoje, em background.
+// Contorna a limitação do sync padrão (que começa em 2023).
+let historicoEmAndamento = false
+
+syncRouter.post('/historico-completo', async (_req: Request, res: Response) => {
+  if (syncEmAndamento || historicoEmAndamento) {
+    return res.status(409).json({
+      success: false,
+      error: 'Sincronização já está em andamento. Tente novamente quando terminar.',
+    })
+  }
+
+  const desde = new Date('2020-01-01T00:00:00Z')
+  const hoje  = new Date()
+
+  // Calcula número de janelas mensais estimadas
+  const meses = (hoje.getFullYear() - 2020) * 12 + hoje.getMonth() + 1
+
+  res.json({
+    success: true,
+    message: 'Sync histórico completo iniciado em background.',
+    estimativa: `Pode demorar 15-30 minutos (${meses} janelas mensais desde jan/2020).`,
+    desde: desde.toISOString().slice(0, 10),
+    janelas_estimadas: meses,
+  })
+
+  historicoEmAndamento = true
+  syncEmAndamento      = true
+
+  try {
+    console.log(`\n[Sync/Histórico] ▶ Iniciando sync histórico completo desde ${desde.toISOString().slice(0, 10)}`)
+    const resultado = await executarSync(false, desde)
+    console.log(
+      `[Sync/Histórico] ✔ Concluído — clientes: +${resultado.clientes.novos}` +
+      ` | compras: +${resultado.compras.novas}` +
+      ` | erros: ${resultado.erros.length}`
+    )
+  } catch (err) {
+    console.error('[Sync/Histórico] Erro inesperado:', err)
+  } finally {
+    historicoEmAndamento = false
+    syncEmAndamento      = false
+  }
+})
+
+// GET /api/sync/debug/historico-info
+// Mostra diagnóstico do que o sync histórico cobrirá
+syncRouter.get('/debug/historico-info', async (_req: Request, res: Response) => {
+  try {
+    const [{ clientes_no_banco }] = await pool.query('SELECT COUNT(*)::int AS clientes_no_banco FROM clientes').then(r => r.rows)
+    const [{ compras_no_banco  }] = await pool.query('SELECT COUNT(*)::int AS compras_no_banco  FROM compras').then(r => r.rows)
+    const [{ data_mais_antiga  }] = await pool.query('SELECT MIN(data_compra) AS data_mais_antiga FROM compras').then(r => r.rows)
+    const [{ data_mais_recente }] = await pool.query('SELECT MAX(data_compra) AS data_mais_recente FROM compras').then(r => r.rows)
+
+    const hoje  = new Date()
+    const inicio2020 = new Date('2020-01-01')
+    const inicio2023 = new Date('2023-01-01')
+
+    const janelasDe2020 = (hoje.getFullYear() - 2020) * 12 + hoje.getMonth() + 1
+    const janelasDe2023 = (hoje.getFullYear() - 2023) * 12 + hoje.getMonth() + 1 + (hoje.getFullYear() >= 2023 ? 1 : 0)
+
+    res.json({
+      banco: {
+        clientes_no_banco,
+        compras_no_banco,
+        data_mais_antiga:  data_mais_antiga  ?? null,
+        data_mais_recente: data_mais_recente ?? null,
+      },
+      sync_padrao: {
+        start_date:        inicio2023.toISOString().slice(0, 10),
+        janelas_mensais:   Math.max(0, janelasDe2023),
+        descricao: 'Sync padrão cobre apenas jan/2023 → hoje',
+      },
+      sync_historico: {
+        start_date:        inicio2020.toISOString().slice(0, 10),
+        janelas_mensais:   janelasDe2020,
+        descricao: 'Sync histórico cobre jan/2020 → hoje (recomendado para recuperar clientes antigos)',
+      },
+      em_andamento: syncEmAndamento || historicoEmAndamento,
+    })
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) })
   }
 })
 

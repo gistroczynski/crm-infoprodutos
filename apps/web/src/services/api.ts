@@ -218,6 +218,49 @@ export const importarCsvApi = {
       },
     }).then(r => r.data)
   },
+
+  importarCompleto: (arquivo: File, onUploadProgress?: (pct: number) => void) => {
+    const form = new FormData()
+    form.append('arquivo', arquivo)
+    return api.post<{
+      success: boolean
+      total_linhas_csv: number
+      emails_unicos: number
+      criados: number
+      atualizados: number
+      sem_telefone: number
+      erros: number
+    }>('/api/clientes/importar-csv/completo', form, {
+      timeout: 300_000, // 5 min — arquivo grande
+      onUploadProgress: e => {
+        if (onUploadProgress && e.total) {
+          onUploadProgress(Math.round((e.loaded / e.total) * 100))
+        }
+      },
+    }).then(r => r.data)
+  },
+}
+
+export interface HistoricoInfo {
+  banco: {
+    clientes_no_banco: number
+    compras_no_banco: number
+    data_mais_antiga: string | null
+    data_mais_recente: string | null
+  }
+  sync_padrao: { start_date: string; janelas_mensais: number; descricao: string }
+  sync_historico: { start_date: string; janelas_mensais: number; descricao: string }
+  em_andamento: boolean
+}
+
+export const historicoSyncApi = {
+  info: () =>
+    api.get<HistoricoInfo>('/api/sync/debug/historico-info').then(r => r.data),
+
+  iniciar: () =>
+    api.post<{ success: boolean; message: string; estimativa: string; desde: string; janelas_estimadas: number }>(
+      '/api/sync/historico-completo'
+    ).then(r => r.data),
 }
 
 // ── Vendas ────────────────────────────────────────────────────────────────

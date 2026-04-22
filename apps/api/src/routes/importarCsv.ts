@@ -45,17 +45,29 @@ const MAPA_TELEFONE = new Set([
   'tel', 'fone',
 ])
 
-function detectarColunas(cabecalhos: string[]): { emailCol: string | null; telefoneCol: string | null } {
+const MAPA_NOME = new Set([
+  'nome', 'nome do comprador', 'comprador', 'nome do cliente',
+  'buyer name', 'buyer', 'name', 'client name', 'cliente',
+  'nome completo', 'full name',
+])
+
+function detectarColunas(cabecalhos: string[]): {
+  emailCol: string | null
+  telefoneCol: string | null
+  nomeCol: string | null
+} {
   let emailCol:    string | null = null
   let telefoneCol: string | null = null
+  let nomeCol:     string | null = null
 
   for (const h of cabecalhos) {
     const n = normalizar(h)
     if (!emailCol    && MAPA_EMAIL.has(n))    emailCol    = h
     if (!telefoneCol && MAPA_TELEFONE.has(n)) telefoneCol = h
+    if (!nomeCol     && MAPA_NOME.has(n))     nomeCol     = h
   }
 
-  return { emailCol, telefoneCol }
+  return { emailCol, telefoneCol, nomeCol }
 }
 
 // ── Detecção de encoding ───────────────────────────────────────────────────
@@ -291,6 +303,124 @@ importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: 
       error: `Erro ao processar arquivo: ${String(err)}`,
       dica:  'Verifique se o arquivo é um CSV válido exportado da Hotmart.',
     })
+  }
+})
+
+// ── POST /completo ─────────────────────────────────────────────────────────
+// Cria clientes novos E atualiza existentes a partir do CSV da Hotmart.
+// Ao contrário do endpoint principal (que só atualiza quem já existe),
+// este faz upsert por email: cria quem não existe + atualiza telefone de quem existe.
+
+importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado. Use o campo "arquivo".' })
+
+  try {
+    const { registros, encoding, separador } = await parsearCsv(req.file.buffer)
+
+    if (registros.length === 0) {
+      return res.status(400).json({ error: 'CSV vazio ou sem linhas de dados.' })
+    }
+
+    const cabecalhos = Object.keys(registros[0])
+    const { emailCol, telefoneCol, nomeCol } = detectarColunas(cabecalhos)
+
+    console.log(`[ImportarCSV/completo] encoding=${encoding} sep="${separador}" colunas=${JSON.stringify(cabecalhos)}`)
+
+    if (!emailCol) {
+      return res.status(400).json({
+        error: 'Coluna de email não encontrada.',
+        colunas_encontradas: cabecalhos,
+        dica: 'Esperado: "E-mail do Comprador", "email", "buyer_email"',
+      })
+    }
+
+    // Deduplica por email — guarda nome e telefone mais recentes não-vazios
+    const porEmail = new Map<string, { nome: string; telefone: string }>()
+    let semEmailNaLinha = 0
+
+    for (const linha of registros) {
+      const email  = linha[emailCol]?.trim().toLowerCase()
+      if (!email) { semEmailNaLinha++; continue }
+
+      const nome   = nomeCol ? (linha[nomeCol]?.trim() || '') : ''
+      const telRaw = telefoneCol ? (linha[telefoneCol]?.trim() || '') : ''
+
+      if (!porEmail.has(email)) {
+        porEmail.set(email, { nome, telefone: telRaw })
+      } else {
+        const atual = porEmail.get(email)!
+        if (!atual.nome     && nome)   atual.nome     = nome
+        if (!atual.telefone && telRaw) atual.telefone = telRaw
+      }
+    }
+
+    const emailsUnicos = porEmail.size
+    console.log(`[ImportarCSV/completo] ${registros.length} linhas → ${emailsUnicos} emails únicos`)
+
+    const resultado = { criados: 0, atualizados: 0, sem_telefone: 0, erros: 0 }
+    const entradas  = [...porEmail.entries()]
+    const LOTE      = 200
+
+    for (let i = 0; i < entradas.length; i += LOTE) {
+      const lote = entradas.slice(i, i + LOTE)
+
+      await Promise.all(lote.map(async ([email, { nome, telefone: telRaw }]) => {
+        try {
+          const nomeUsado = nome || email.split('@')[0] // fallback: prefixo do email
+
+          let telefoneFormatado: string | null = null
+          let telefoneValido    = false
+
+          if (telRaw) {
+            const fmt = formatarTelefone(telRaw)
+            telefoneFormatado = fmt.formatado
+            telefoneValido    = fmt.valido
+          } else {
+            resultado.sem_telefone++
+          }
+
+          const r = await pool.query<{ id: string; xmax: string }>(`
+            INSERT INTO clientes (nome, email, telefone_raw, telefone_formatado, telefone_valido)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (email) DO UPDATE SET
+              nome               = CASE WHEN LENGTH(COALESCE(clientes.nome, '')) < 2
+                                        THEN EXCLUDED.nome ELSE clientes.nome END,
+              telefone_raw       = CASE WHEN EXCLUDED.telefone_raw IS NOT NULL AND EXCLUDED.telefone_raw != ''
+                                        THEN EXCLUDED.telefone_raw ELSE clientes.telefone_raw END,
+              telefone_formatado = CASE WHEN EXCLUDED.telefone_formatado IS NOT NULL
+                                        THEN EXCLUDED.telefone_formatado ELSE clientes.telefone_formatado END,
+              telefone_valido    = CASE WHEN EXCLUDED.telefone_formatado IS NOT NULL
+                                        THEN EXCLUDED.telefone_valido ELSE clientes.telefone_valido END,
+              updated_at         = NOW()
+            RETURNING id, xmax::text
+          `, [nomeUsado, email, telRaw || null, telefoneFormatado, telefoneValido])
+
+          const row = r.rows[0]
+          if (row.xmax === '0') resultado.criados++
+          else                  resultado.atualizados++
+        } catch (err) {
+          console.error(`[ImportarCSV/completo] Erro ao processar ${email}:`, err)
+          resultado.erros++
+        }
+      }))
+
+      if (i % (LOTE * 5) === 0) {
+        console.log(`[ImportarCSV/completo] Progresso: ${Math.min(i + LOTE, entradas.length)}/${entradas.length}`)
+      }
+    }
+
+    console.log(
+      `[ImportarCSV/completo] Concluído:` +
+      ` criados=${resultado.criados}` +
+      ` atualizados=${resultado.atualizados}` +
+      ` sem_telefone=${resultado.sem_telefone}` +
+      ` erros=${resultado.erros}`
+    )
+
+    res.json({ success: true, total_linhas_csv: registros.length, emails_unicos: emailsUnicos, ...resultado })
+  } catch (err) {
+    console.error('[ImportarCSV/completo] Erro:', err)
+    res.status(500).json({ error: `Erro ao processar arquivo: ${String(err)}` })
   }
 })
 

@@ -2,18 +2,30 @@ import { useRef, useState } from 'react'
 import { importarCsvApi, type PreviewCsv, type ResultadoImportacao } from '../services/api'
 
 type Etapa = 'idle' | 'preview' | 'enviando' | 'processando' | 'resultado'
+type Modo  = 'telefones' | 'completo'
 
 function formatarTamanho(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+interface ResultadoCompleto {
+  total_linhas_csv: number
+  emails_unicos: number
+  criados: number
+  atualizados: number
+  sem_telefone: number
+  erros: number
+}
+
 export default function ImportarTelefones() {
   const inputRef = useRef<HTMLInputElement>(null)
+  const [modo, setModo]         = useState<Modo>('telefones')
   const [etapa, setEtapa]       = useState<Etapa>('idle')
   const [arquivo, setArquivo]   = useState<File | null>(null)
   const [preview, setPreview]   = useState<PreviewCsv | null>(null)
-  const [resultado, setResultado] = useState<ResultadoImportacao | null>(null)
+  const [resultado,    setResultado]    = useState<ResultadoImportacao | null>(null)
+  const [resultadoCompleto, setResultadoCompleto] = useState<ResultadoCompleto | null>(null)
   const [erro, setErro]         = useState<string | null>(null)
   const [drag, setDrag]         = useState(false)
   const [uploadPct, setUploadPct] = useState(0)
@@ -78,11 +90,19 @@ export default function ImportarTelefones() {
     setUploadPct(0)
     setEtapa('enviando')
     try {
-      const data = await importarCsvApi.importar(arquivo, pct => {
-        setUploadPct(pct)
-        if (pct === 100) setEtapa('processando')
-      })
-      setResultado(data)
+      if (modo === 'completo') {
+        const data = await importarCsvApi.importarCompleto(arquivo, pct => {
+          setUploadPct(pct)
+          if (pct === 100) setEtapa('processando')
+        })
+        setResultadoCompleto(data)
+      } else {
+        const data = await importarCsvApi.importar(arquivo, pct => {
+          setUploadPct(pct)
+          if (pct === 100) setEtapa('processando')
+        })
+        setResultado(data)
+      }
       setEtapa('resultado')
     } catch (e: any) {
       const msg = e?.response?.data?.error ?? 'Erro ao importar. Tente novamente.'
@@ -96,23 +116,67 @@ export default function ImportarTelefones() {
     setArquivo(null)
     setPreview(null)
     setResultado(null)
+    setResultadoCompleto(null)
     setErro(null)
     if (inputRef.current) inputRef.current.value = ''
+  }
+
+  function trocarModo(novoModo: Modo) {
+    setModo(novoModo)
+    reiniciar()
   }
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className="space-y-5">
 
-      {/* Cabeçalho */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
-        <p className="font-medium mb-1">Como importar telefones da Hotmart</p>
-        <ol className="list-decimal list-inside space-y-0.5 text-blue-700">
-          <li>No painel Hotmart: <strong>Vendas → Histórico de Vendas → Exportar CSV</strong></li>
-          <li>Faça upload do arquivo exportado abaixo</li>
-          <li>O sistema vincula o telefone pelo e-mail do comprador</li>
-        </ol>
+      {/* Seletor de modo */}
+      <div className="flex rounded-lg overflow-hidden border border-gray-200 text-sm font-medium">
+        <button
+          onClick={() => trocarModo('telefones')}
+          className={[
+            'flex-1 px-4 py-2.5 transition-colors text-center',
+            modo === 'telefones'
+              ? 'bg-primary-600 text-white'
+              : 'bg-white text-gray-600 hover:bg-gray-50',
+          ].join(' ')}
+        >
+          Atualizar telefones existentes
+        </button>
+        <button
+          onClick={() => trocarModo('completo')}
+          className={[
+            'flex-1 px-4 py-2.5 transition-colors text-center border-l border-gray-200',
+            modo === 'completo'
+              ? 'bg-emerald-600 text-white'
+              : 'bg-white text-gray-600 hover:bg-gray-50',
+          ].join(' ')}
+        >
+          Importação completa (cria novos + atualiza)
+        </button>
       </div>
+
+      {/* Cabeçalho contextual */}
+      {modo === 'telefones' ? (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
+          <p className="font-medium mb-1">Atualizar telefones de clientes existentes</p>
+          <ol className="list-decimal list-inside space-y-0.5 text-blue-700">
+            <li>No painel Hotmart: <strong>Vendas → Histórico de Vendas → Exportar CSV</strong></li>
+            <li>Faça upload do arquivo exportado abaixo</li>
+            <li>O sistema vincula o telefone pelo e-mail do comprador (clientes já cadastrados)</li>
+          </ol>
+        </div>
+      ) : (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-800">
+          <p className="font-medium mb-1">Importação completa — cria clientes novos + atualiza existentes</p>
+          <ol className="list-decimal list-inside space-y-0.5 text-emerald-700">
+            <li>Exporte o CSV completo de vendas da Hotmart (todos os registros)</li>
+            <li>Faça upload aqui — o sistema detecta nome, e-mail e telefone</li>
+            <li>Clientes que <strong>não existem</strong> no banco serão <strong>criados</strong></li>
+            <li>Clientes que <strong>já existem</strong> terão o telefone <strong>atualizado</strong></li>
+          </ol>
+        </div>
+      )}
 
       {/* Botão modelo + input oculto */}
       <div className="flex items-center gap-3">
@@ -285,49 +349,73 @@ export default function ImportarTelefones() {
         </div>
       )}
 
-      {/* Resultado */}
-      {etapa === 'resultado' && resultado && (
+      {/* Resultado — modo telefones */}
+      {etapa === 'resultado' && resultado && modo === 'telefones' && (
         <div className="space-y-3">
           <p className="text-sm font-medium text-gray-800">Resultado da importação</p>
-
           <div className="space-y-2">
-            {/* Resumo do CSV */}
             <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-gray-600 space-y-0.5">
               <p>{resultado.total_linhas_csv.toLocaleString('pt-BR')} linhas no CSV · {resultado.emails_unicos_encontrados.toLocaleString('pt-BR')} e-mails únicos</p>
               {resultado.sem_telefone_no_csv > 0 && (
                 <p className="text-gray-400">{resultado.sem_telefone_no_csv} e-mails sem telefone no CSV (ignorados)</p>
               )}
             </div>
-
             <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-2.5">
               <span className="text-lg">✓</span>
               <span><strong>{resultado.atualizados}</strong> telefones atualizados com sucesso</span>
             </div>
-
             {resultado.nao_encontrados > 0 && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2.5">
                 <p className="text-sm text-yellow-800 font-medium">
                   ⚠ {resultado.nao_encontrados} e-mails não encontrados no CRM
                 </p>
                 <p className="text-xs text-yellow-600 mt-0.5">
-                  Esses compradores ainda não foram sincronizados via Hotmart.
+                  Use "Importação completa" para criar esses clientes automaticamente.
                 </p>
               </div>
             )}
-
             {resultado.erros > 0 && (
               <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">
-                <p className="text-sm text-red-800 font-medium">
-                  ✗ {resultado.erros} erros ao processar
-                </p>
+                <p className="text-sm text-red-800 font-medium">✗ {resultado.erros} erros ao processar</p>
               </div>
             )}
           </div>
+          <button onClick={reiniciar} className="text-sm text-gray-500 hover:text-gray-700 underline">
+            Importar outro arquivo
+          </button>
+        </div>
+      )}
 
-          <button
-            onClick={reiniciar}
-            className="text-sm text-gray-500 hover:text-gray-700 underline"
-          >
+      {/* Resultado — modo completo */}
+      {etapa === 'resultado' && resultadoCompleto && modo === 'completo' && (
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-gray-800">Resultado da importação completa</p>
+          <div className="space-y-2">
+            <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-gray-600 space-y-0.5">
+              <p>{resultadoCompleto.total_linhas_csv.toLocaleString('pt-BR')} linhas · {resultadoCompleto.emails_unicos.toLocaleString('pt-BR')} e-mails únicos</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-center">
+                <p className="text-2xl font-bold text-emerald-700">{resultadoCompleto.criados.toLocaleString('pt-BR')}</p>
+                <p className="text-xs text-emerald-600 mt-0.5">clientes criados</p>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-center">
+                <p className="text-2xl font-bold text-blue-700">{resultadoCompleto.atualizados.toLocaleString('pt-BR')}</p>
+                <p className="text-xs text-blue-600 mt-0.5">telefones atualizados</p>
+              </div>
+            </div>
+            {resultadoCompleto.sem_telefone > 0 && (
+              <p className="text-xs text-gray-400 text-center">
+                {resultadoCompleto.sem_telefone.toLocaleString('pt-BR')} clientes sem telefone no CSV (criados sem telefone)
+              </p>
+            )}
+            {resultadoCompleto.erros > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">
+                <p className="text-sm text-red-800 font-medium">✗ {resultadoCompleto.erros} erros ao processar</p>
+              </div>
+            )}
+          </div>
+          <button onClick={reiniciar} className="text-sm text-gray-500 hover:text-gray-700 underline">
             Importar outro arquivo
           </button>
         </div>

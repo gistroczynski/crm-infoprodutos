@@ -19,9 +19,11 @@ import { debugRouter } from './routes/debug'
 import { relatoriosRouter } from './routes/relatorios'
 import { vendasRouter } from './routes/vendas'
 import { cadenciasRouter } from './routes/cadencias'
+import { reativacaoRouter } from './routes/reativacao'
 import { errorHandler } from './middleware/errorHandler'
 import { executarSync } from './jobs/sync'
 import { executarGeracaoLista } from './jobs/lista'
+import { executarListaReativacao, executarPopularFilaReativacao } from './jobs/cadencia'
 
 dotenv.config()
 
@@ -124,6 +126,7 @@ app.use('/api/debug', debugRouter)
 app.use('/api/relatorios', relatoriosRouter)
 app.use('/api/vendas', vendasRouter)
 app.use('/api/cadencias', cadenciasRouter)
+app.use('/api/reativacao', reativacaoRouter)
 
 // ── Error handler ──────────────────────────────────────────────────────────
 app.use(errorHandler)
@@ -140,6 +143,16 @@ cron.schedule('0 */2 * * *', async () => {
 
 // ── Cron: gera lista diária todo dia às 06:00 ─────────────────────────────
 cron.schedule('0 6 * * *', executarGeracaoLista)
+
+// ── Cron: pré-aquece lista de reativação às 06:05 (após geração da lista) ──
+cron.schedule('5 6 * * *', async () => {
+  try { await executarListaReativacao() } catch {}
+})
+
+// ── Cron: popula fila de reativação todo domingo às 23:00 ─────────────────
+cron.schedule('0 23 * * 0', async () => {
+  try { await executarPopularFilaReativacao() } catch {}
+})
 
 // ── Start ──────────────────────────────────────────────────────────────────
 async function start() {

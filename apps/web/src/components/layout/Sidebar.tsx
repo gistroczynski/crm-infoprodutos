@@ -9,7 +9,8 @@ import {
   LayoutDashboardIcon,
   BarChart3Icon,
   SettingsIcon,
-  GitBranchIcon,
+  ZapIcon,
+  RotateCcwIcon,
 } from './icons'
 
 // ── Hooks internos ─────────────────────────────────────────────────────────
@@ -28,6 +29,36 @@ function usePendingCount() {
     return () => clearInterval(interval)
   }, [])
 
+  return count
+}
+
+function useFluxoAtivoCount() {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    const fetch = () => {
+      api.get<{ total: number }>('/api/cadencias/fluxo-ativo')
+        .then(r => setCount(r.data.total))
+        .catch(() => {})
+    }
+    fetch()
+    const interval = setInterval(fetch, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [])
+  return count
+}
+
+function useReativacaoCount() {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    const fetch = () => {
+      api.get<{ aguardando: number }>('/api/reativacao/stats')
+        .then(r => setCount(r.data.aguardando))
+        .catch(() => {})
+    }
+    fetch()
+    const interval = setInterval(fetch, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [])
   return count
 }
 
@@ -85,8 +116,10 @@ function tempoPassado(iso: string | null): string {
 
 export default function Sidebar() {
   const toast       = useToast()
-  const pending     = usePendingCount()
-  const vendasHoje  = useVendasHojeCount()
+  const pending      = usePendingCount()
+  const fluxoAtivo   = useFluxoAtivoCount()
+  const reativacao   = useReativacaoCount()
+  const vendasHoje   = useVendasHojeCount()
   const { ultimaSync, emAndamento, refetch } = useSyncStatus()
   const [syncing, setSyncing] = useState(false)
 
@@ -104,13 +137,14 @@ export default function Sidebar() {
   }
 
   const navItems = [
-    { to: '/lista-diaria', label: 'Lista Diária', Icon: ClipboardListIcon,  badge: pending    > 0 ? pending    : 0, badgeColor: 'bg-red-500'   },
-    { to: '/cadencias',    label: 'Cadências',    Icon: GitBranchIcon,       badge: 0,                              badgeColor: 'bg-red-500'   },
-    { to: '/clientes',     label: 'Clientes',     Icon: UsersIcon,           badge: 0,                              badgeColor: 'bg-red-500'   },
-    { to: '/vendas',       label: 'Vendas',       Icon: ShoppingCartIcon,    badge: vendasHoje > 0 ? vendasHoje : 0, badgeColor: 'bg-green-500' },
-    { to: '/dashboard',    label: 'Dashboard',    Icon: LayoutDashboardIcon, badge: 0,                              badgeColor: 'bg-red-500'   },
-    { to: '/relatorios',   label: 'Relatórios',   Icon: BarChart3Icon,       badge: 0,                              badgeColor: 'bg-red-500'   },
-    { to: '/configuracoes',label: 'Configurações',Icon: SettingsIcon,        badge: 0,                              badgeColor: 'bg-red-500'   },
+    { to: '/lista-diaria',  label: 'Lista Diária',  Icon: ClipboardListIcon,   badge: pending     > 0 ? pending     : 0, badgeColor: 'bg-red-500'    },
+    { to: '/fluxo-ativo',   label: 'Fluxo Ativo',   Icon: ZapIcon,             badge: fluxoAtivo  > 0 ? fluxoAtivo  : 0, badgeColor: 'bg-red-500'    },
+    { to: '/reativacao',    label: 'Reativação',    Icon: RotateCcwIcon,       badge: reativacao  > 0 ? Math.min(reativacao, 9999) : 0, badgeColor: 'bg-orange-500' },
+    { to: '/clientes',      label: 'Clientes',      Icon: UsersIcon,           badge: 0,                                 badgeColor: 'bg-red-500'    },
+    { to: '/vendas',        label: 'Vendas',        Icon: ShoppingCartIcon,    badge: vendasHoje  > 0 ? vendasHoje  : 0, badgeColor: 'bg-green-500'  },
+    { to: '/dashboard',     label: 'Dashboard',     Icon: LayoutDashboardIcon, badge: 0,                                 badgeColor: 'bg-red-500'    },
+    { to: '/relatorios',    label: 'Relatórios',    Icon: BarChart3Icon,       badge: 0,                                 badgeColor: 'bg-red-500'    },
+    { to: '/configuracoes', label: 'Configurações', Icon: SettingsIcon,        badge: 0,                                 badgeColor: 'bg-red-500'    },
   ]
 
   return (

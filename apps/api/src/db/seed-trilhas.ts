@@ -20,8 +20,9 @@ interface EtapaInput {
 
 interface TrilhaInput {
   nome: string
-  produto_entrada_nome: string
+  produto_entrada_nome?: string
   cor: string
+  tipo_pipeline?: 'ativo' | 'reativacao'
   etapas: EtapaInput[]
 }
 
@@ -214,65 +215,164 @@ const TRILHAS: TrilhaInput[] = [
   },
 ]
 
+// ── Trilhas de REATIVAÇÃO ──────────────────────────────────────────────────
+
+const TRILHAS_REATIVACAO: TrilhaInput[] = [
+  {
+    nome: 'Reativação - Workshop/Masterclass/Desafio',
+    cor: '#F97316',
+    tipo_pipeline: 'reativacao',
+    etapas: [
+      {
+        dia: 1, nome: 'Reabertura',
+        mensagem: 'Oi {nome}! Tudo bem? Faz um tempo que a gente não se fala. Vi que você passou pelo {produto} e queria saber como foi sua experiência com o conteúdo 🤝',
+      },
+      {
+        dia: 7, nome: 'Diagnóstico',
+        mensagem: '{nome}, você chegou a aplicar alguma coisa do {produto} no dia a dia? Pergunto porque dependendo de onde você está, tenho algo que pode ser o próximo passo certo pra você.',
+      },
+      {
+        dia: 14, nome: 'Convite suave',
+        mensagem: '{nome}, tenho acompanhado homens que fizeram o {produto} e depois avançaram para o Conduta Masculina — e o salto foi enorme. É um programa completo de desenvolvimento masculino. Posso te contar mais sobre ele?',
+      },
+      {
+        dia: 21, nome: 'Última tentativa',
+        mensagem: '{nome}, última mensagem por aqui. Se um dia você quiser dar o próximo passo na sua jornada, o Conduta Masculina vai estar aqui. Qualquer coisa é só chamar. Abraço 🤝',
+      },
+    ],
+  },
+  {
+    nome: 'Reativação - Livros',
+    cor: '#8B5CF6',
+    tipo_pipeline: 'reativacao',
+    etapas: [
+      {
+        dia: 1, nome: 'Reabertura',
+        mensagem: 'Oi {nome}! Tudo bem? Vi aqui que você tem o {produto} e queria saber se você chegou a ler. Como foi? 📖',
+      },
+      {
+        dia: 10, nome: 'Diagnóstico',
+        mensagem: '{nome}, pergunta rápida: o {produto} te ajudou de alguma forma prática? Dependendo da sua resposta, tenho uma indicação que pode fazer muito sentido pra você agora.',
+      },
+      {
+        dia: 20, nome: 'Convite suave',
+        mensagem: '{nome}, homens que leram o {produto} e avançaram para o Conduta Masculina dizem que foi a combinação mais transformadora que já fizeram. Um complementa o outro de forma única. Posso te contar como funciona?',
+      },
+      {
+        dia: 30, nome: 'Última tentativa',
+        mensagem: '{nome}, não quero tomar mais seu tempo. Mas se um dia você sentir que é hora de ir além e ter um programa completo de desenvolvimento, o Conduta Masculina vai estar aqui. Abraço 💪',
+      },
+    ],
+  },
+  {
+    nome: 'Reativação - Múltiplos Produtos',
+    cor: '#EF4444',
+    tipo_pipeline: 'reativacao',
+    etapas: [
+      {
+        dia: 1, nome: 'Reabertura VIP',
+        mensagem: 'Oi {nome}! Tudo bem? Vi aqui que você tem vários dos nossos materiais — isso mostra que você leva seu desenvolvimento a sério. Queria entender como está sendo sua jornada 🙏',
+      },
+      {
+        dia: 5, nome: 'Diagnóstico direto',
+        mensagem: '{nome}, você que já passou por mais de um dos nossos conteúdos está bem posicionado para o próximo nível. O Conduta Masculina foi feito exatamente para quem chegou onde você chegou. Posso te apresentar?',
+      },
+      {
+        dia: 12, nome: 'Oferta direta',
+        mensagem: '{nome}, vou ser direto: quem tem o perfil que você tem — que investiu em mais de um conteúdo — é exatamente quem mais aproveita o Conduta Masculina. Posso te mandar mais detalhes?',
+      },
+      {
+        dia: 20, nome: 'Última tentativa',
+        mensagem: '{nome}, última mensagem. Quando sentir que é a hora de consolidar tudo que você já aprendeu num programa completo, o Conduta vai estar aqui. 💪',
+      },
+    ],
+  },
+  {
+    nome: 'Reativação - Order Bump',
+    cor: '#6B7280',
+    tipo_pipeline: 'reativacao',
+    etapas: [
+      {
+        dia: 1, nome: 'Reabertura leve',
+        mensagem: 'Oi {nome}! Tudo bem? Vi que você pegou o {produto} e queria saber se teve a chance de acessar o conteúdo 😊',
+      },
+      {
+        dia: 14, nome: 'Apresentação',
+        mensagem: '{nome}, para quem tem o {produto}, o próximo passo natural seria o Conduta Masculina — um programa completo que aprofunda tudo isso. Você teria interesse em saber mais?',
+      },
+      {
+        dia: 28, nome: 'Última tentativa',
+        mensagem: '{nome}, última mensagem por aqui. Se quiser dar um próximo passo mais completo na sua jornada, o Conduta Masculina vai estar aqui. Abraço 🤝',
+      },
+    ],
+  },
+]
+
 // ── Runner ─────────────────────────────────────────────────────────────────
+
+async function criarTrilha(
+  trilha: TrilhaInput,
+  destinoId: string | null
+): Promise<boolean> {
+  const existente = await queryOne<{ id: string }>(
+    `SELECT id FROM trilhas_cadencia WHERE nome = $1`, [trilha.nome]
+  )
+  if (existente) {
+    console.log(`[Seed] Trilha já existe, pulando: "${trilha.nome}"`)
+    return false
+  }
+
+  let entradaId: string | null = null
+  if (trilha.produto_entrada_nome) {
+    const entrada = await queryOne<{ id: string }>(`
+      SELECT id FROM produtos WHERE nome ILIKE $1 LIMIT 1
+    `, [`%${trilha.produto_entrada_nome}%`])
+    if (!entrada) {
+      console.warn(`[Seed] Produto de entrada não encontrado: "${trilha.produto_entrada_nome}" — criada sem vínculo`)
+    }
+    entradaId = entrada?.id ?? null
+  }
+
+  const novaTrilha = await queryOne<{ id: string }>(`
+    INSERT INTO trilhas_cadencia (nome, produto_entrada_id, produto_destino_id, cor, tipo_pipeline)
+    VALUES ($1, $2, $3, $4, $5)
+    RETURNING id
+  `, [trilha.nome, entradaId, destinoId, trilha.cor, trilha.tipo_pipeline ?? 'ativo'])
+
+  if (!novaTrilha) {
+    console.error(`[Seed] Falha ao criar trilha: "${trilha.nome}"`)
+    return false
+  }
+
+  for (let i = 0; i < trilha.etapas.length; i++) {
+    const etapa = trilha.etapas[i]
+    await pool.query(`
+      INSERT INTO etapas_cadencia (trilha_id, numero_etapa, nome, dia_envio, mensagem_whatsapp, ordem)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `, [novaTrilha.id, i + 1, etapa.nome, etapa.dia, etapa.mensagem, i])
+  }
+
+  console.log(`[Seed] Trilha criada: "${trilha.nome}" (${trilha.etapas.length} etapas | pipeline: ${trilha.tipo_pipeline ?? 'ativo'})`)
+  return true
+}
 
 async function seed() {
   console.log('[Seed] Iniciando seed de trilhas de cadência...')
 
-  // Busca produto destino (Conduta Masculina)
   const destino = await queryOne<{ id: string }>(`
     SELECT id FROM produtos WHERE nome ILIKE '%Conduta Masculina%' LIMIT 1
   `)
   if (!destino) {
-    console.warn('[Seed] Produto "Conduta Masculina" não encontrado. A trilha será criada sem produto_destino_id.')
+    console.warn('[Seed] Produto "Conduta Masculina" não encontrado.')
   }
 
   let criadas = 0
   let puladas = 0
 
-  for (const trilha of TRILHAS) {
-    // Verifica se já existe
-    const existente = await queryOne<{ id: string }>(
-      `SELECT id FROM trilhas_cadencia WHERE nome = $1`, [trilha.nome]
-    )
-    if (existente) {
-      console.log(`[Seed] Trilha já existe, pulando: "${trilha.nome}"`)
-      puladas++
-      continue
-    }
-
-    // Busca produto de entrada
-    const entrada = await queryOne<{ id: string }>(`
-      SELECT id FROM produtos WHERE nome ILIKE $1 LIMIT 1
-    `, [`%${trilha.produto_entrada_nome}%`])
-
-    if (!entrada) {
-      console.warn(`[Seed] Produto de entrada não encontrado: "${trilha.produto_entrada_nome}" — trilha criada sem vínculo`)
-    }
-
-    // Insere trilha
-    const novaTrilha = await queryOne<{ id: string }>(`
-      INSERT INTO trilhas_cadencia (nome, produto_entrada_id, produto_destino_id, cor)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id
-    `, [trilha.nome, entrada?.id ?? null, destino?.id ?? null, trilha.cor])
-
-    if (!novaTrilha) {
-      console.error(`[Seed] Falha ao criar trilha: "${trilha.nome}"`)
-      continue
-    }
-
-    // Insere etapas
-    for (let i = 0; i < trilha.etapas.length; i++) {
-      const etapa = trilha.etapas[i]
-      await pool.query(`
-        INSERT INTO etapas_cadencia (trilha_id, numero_etapa, nome, dia_envio, mensagem_whatsapp, ordem)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `, [novaTrilha.id, i + 1, etapa.nome, etapa.dia, etapa.mensagem, i])
-    }
-
-    console.log(`[Seed] Trilha criada: "${trilha.nome}" (${trilha.etapas.length} etapas)`)
-    criadas++
+  for (const trilha of [...TRILHAS, ...TRILHAS_REATIVACAO]) {
+    const criada = await criarTrilha(trilha, destino?.id ?? null)
+    if (criada) criadas++
+    else puladas++
   }
 
   console.log(`\n[Seed] Concluído — criadas: ${criadas} | puladas: ${puladas}`)

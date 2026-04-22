@@ -10,6 +10,8 @@ import Relatorios from './pages/Relatorios'
 import Configuracoes from './pages/Configuracoes'
 import Vendas from './pages/Vendas'
 import Cadencias from './pages/Cadencias'
+import FluxoAtivo from './pages/FluxoAtivo'
+import Reativacao from './pages/Reativacao'
 import Erro404 from './pages/Erro404'
 
 export default function App() {
@@ -24,6 +26,8 @@ export default function App() {
           <Route path="clientes/:id" element={<Cliente />} />
           <Route path="vendas" element={<Vendas />} />
           <Route path="cadencias" element={<Cadencias />} />
+          <Route path="fluxo-ativo" element={<FluxoAtivo />} />
+          <Route path="reativacao" element={<Reativacao />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="relatorios" element={<Relatorios />} />
           <Route path="configuracoes" element={<Configuracoes />} />

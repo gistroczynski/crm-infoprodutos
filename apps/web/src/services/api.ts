@@ -383,6 +383,96 @@ export const cadenciasApi = {
     }>('/api/cadencias/metricas').then(r => r.data),
 }
 
+// ── Fluxo Ativo ───────────────────────────────────────────────────────────
+
+export interface ItemFluxoAtivo {
+  id: string
+  cliente_id: string
+  cliente_nome: string
+  cliente_email: string
+  cliente_telefone: string | null
+  trilha_id: string
+  trilha_nome: string
+  trilha_cor: string
+  produto_entrada: string
+  etapa_atual: number
+  total_etapas: number
+  etapa_id: string
+  nome_etapa: string
+  dias_na_trilha: number
+  mensagem_do_dia: string
+  link_whatsapp: string | null
+  status: string
+}
+
+export const fluxoAtivoApi = {
+  listaDia: () =>
+    api.get<{ success: boolean; total: number; itens: ItemFluxoAtivo[] }>(
+      '/api/cadencias/fluxo-ativo'
+    ).then(r => r.data),
+
+  avancar: (id: string, status_contato: string, observacao?: string) =>
+    api.patch<{ success: boolean; proximo_status: string; data_proxima_etapa: string | null }>(
+      `/api/cadencias/clientes-trilha/${id}/avancar`,
+      { status_contato, observacao }
+    ).then(r => r.data),
+}
+
+// ── Reativação ────────────────────────────────────────────────────────────
+
+export interface ItemReativacao {
+  id: string
+  fila_id: string
+  cliente_id: string
+  cliente_nome: string
+  cliente_email: string
+  cliente_telefone: string | null
+  produto_comprado: string
+  tipo_produto: string
+  dias_desde_compra: number
+  score_prioridade: number
+  trilha_nome: string
+  trilha_cor: string
+  etapa_atual: number
+  total_etapas: number
+  nome_etapa: string
+  mensagem_do_dia: string
+  link_whatsapp: string | null
+}
+
+export interface StatsReativacao {
+  total_fila: number
+  aguardando: number
+  em_cadencia: number
+  convertidos: number
+  descartados: number
+  sem_telefone: number
+  por_tipo_produto: { multiplos: number; workshop: number; livro: number; order_bump: number }
+  limite_diario: number
+  projecao_dias_para_zerar: number | null
+}
+
+export const reativacaoApi = {
+  stats: () =>
+    api.get<{ success: boolean } & StatsReativacao>('/api/reativacao/stats').then(r => r.data),
+
+  listaDia: () =>
+    api.get<{ success: boolean; total: number; itens: ItemReativacao[] }>(
+      '/api/reativacao/lista-do-dia'
+    ).then(r => r.data),
+
+  popularFila: () =>
+    api.post<{ success: boolean; adicionados: number; ja_na_fila: number; sem_telefone: number; ja_convertidos: number }>(
+      '/api/reativacao/popular-fila'
+    ).then(r => r.data),
+
+  avancar: (id: string, status_contato: string, observacao?: string) =>
+    api.patch<{ success: boolean; proximo_status: string; data_proxima_etapa: string | null }>(
+      `/api/reativacao/clientes-trilha/${id}/avancar`,
+      { status_contato, observacao }
+    ).then(r => r.data),
+}
+
 export const vendasApi = {
   list: (params?: {
     inicio?: string; fim?: string

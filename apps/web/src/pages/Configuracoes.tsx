@@ -6,7 +6,7 @@ import ImportarTelefones from '../components/ImportarTelefones'
 import api from '../services/api'
 import { useToast } from '../hooks/useToast'
 
-type Aba = 'geral' | 'funil' | 'telefones'
+type Aba = 'geral' | 'funil' | 'comercial' | 'telefones'
 
 const labels: Record<string, string> = {
   limite_lista_diaria:    'Limite da lista diária',
@@ -234,15 +234,108 @@ function AbaFunil() {
   )
 }
 
+// ── Aba Comercial ──────────────────────────────────────────────────────────
+
+const COMERCIAL_CONFIGS: { chave: string; label: string; desc: string; min: number; max: number; step: number }[] = [
+  {
+    chave: 'limite_fluxo_ativo',
+    label: 'Limite diário — Fluxo Ativo',
+    desc:  'Máximo de contatos do Fluxo Ativo por dia.',
+    min: 5, max: 100, step: 5,
+  },
+  {
+    chave: 'limite_reativacao_diaria',
+    label: 'Limite diário — Reativação',
+    desc:  'Máximo de leads reativados por dia.',
+    min: 5, max: 100, step: 5,
+  },
+  {
+    chave: 'dias_lead_antigo',
+    label: 'Dias para considerar lead antigo',
+    desc:  'Leads com última compra há mais de X dias entram na fila de Reativação.',
+    min: 7, max: 180, step: 1,
+  },
+]
+
+function AbaComercial() {
+  const toast   = useToast()
+  const [draft,   setDraft]   = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(true)
+  const [saving,  setSaving]  = useState<string | null>(null)
+
+  useEffect(() => {
+    configuracoesApi.list().then(rows => {
+      const m = Object.fromEntries(rows.map(r => [r.chave, r.valor ?? '']))
+      const defaults: Record<string, string> = {
+        limite_fluxo_ativo:      '30',
+        limite_reativacao_diaria:'15',
+        dias_lead_antigo:        '30',
+      }
+      setDraft({ ...defaults, ...m })
+    }).finally(() => setLoading(false))
+  }, [])
+
+  async function salvar(chave: string) {
+    setSaving(chave)
+    try {
+      await configuracoesApi.save(chave, draft[chave] ?? '')
+      toast.success('Configuração salva!')
+    } catch {
+      toast.error('Erro ao salvar. Tente novamente.')
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  if (loading) return <div className="text-gray-400 text-sm">Carregando...</div>
+
+  return (
+    <div className="space-y-4">
+      {COMERCIAL_CONFIGS.map(({ chave, label, desc, min, max, step }) => (
+        <div key={chave} className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-gray-900">{label}</h3>
+              <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+              <div className="mt-3 flex items-center gap-3">
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={draft[chave] ?? min}
+                  onChange={e => setDraft(d => ({ ...d, [chave]: e.target.value }))}
+                  className="flex-1 accent-primary-600"
+                />
+                <span className="text-sm font-bold text-gray-800 w-10 text-right tabular-nums">
+                  {draft[chave] ?? min}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => salvar(chave)}
+              disabled={saving === chave}
+              className="flex-shrink-0 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {saving === chave ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── Configuracoes ──────────────────────────────────────────────────────────
 
 export default function Configuracoes() {
   const [aba, setAba] = useState<Aba>('geral')
 
   const ABAS: { id: Aba; label: string }[] = [
-    { id: 'geral',     label: 'Geral'     },
-    { id: 'funil',     label: 'Funil'     },
-    { id: 'telefones', label: 'Telefones' },
+    { id: 'geral',     label: 'Geral'      },
+    { id: 'funil',     label: 'Funil'      },
+    { id: 'comercial', label: 'Comercial'  },
+    { id: 'telefones', label: 'Telefones'  },
   ]
 
   return (
@@ -268,6 +361,7 @@ export default function Configuracoes() {
 
       {aba === 'geral'     && <AbaGeral />}
       {aba === 'funil'     && <AbaFunil />}
+      {aba === 'comercial' && <AbaComercial />}
       {aba === 'telefones' && (
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-base font-semibold text-gray-900 mb-1">Importar telefones dos clientes</h2>

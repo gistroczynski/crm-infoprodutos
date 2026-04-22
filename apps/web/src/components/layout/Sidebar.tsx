@@ -9,6 +9,7 @@ import {
   LayoutDashboardIcon,
   BarChart3Icon,
   SettingsIcon,
+  GitBranchIcon,
 } from './icons'
 
 // ── Hooks internos ─────────────────────────────────────────────────────────
@@ -103,12 +104,13 @@ export default function Sidebar() {
   }
 
   const navItems = [
-    { to: '/lista-diaria', label: 'Lista Diária', Icon: ClipboardListIcon,  badge: pending    > 0 ? pending    : 0, badgeColor: 'bg-red-500' },
-    { to: '/clientes',     label: 'Clientes',     Icon: UsersIcon,           badge: 0,                              badgeColor: 'bg-red-500' },
+    { to: '/lista-diaria', label: 'Lista Diária', Icon: ClipboardListIcon,  badge: pending    > 0 ? pending    : 0, badgeColor: 'bg-red-500'   },
+    { to: '/cadencias',    label: 'Cadências',    Icon: GitBranchIcon,       badge: 0,                              badgeColor: 'bg-red-500'   },
+    { to: '/clientes',     label: 'Clientes',     Icon: UsersIcon,           badge: 0,                              badgeColor: 'bg-red-500'   },
     { to: '/vendas',       label: 'Vendas',       Icon: ShoppingCartIcon,    badge: vendasHoje > 0 ? vendasHoje : 0, badgeColor: 'bg-green-500' },
-    { to: '/dashboard',    label: 'Dashboard',    Icon: LayoutDashboardIcon, badge: 0,                              badgeColor: 'bg-red-500' },
-    { to: '/relatorios',   label: 'Relatórios',   Icon: BarChart3Icon,       badge: 0,                              badgeColor: 'bg-red-500' },
-    { to: '/configuracoes',label: 'Configurações',Icon: SettingsIcon,        badge: 0,                              badgeColor: 'bg-red-500' },
+    { to: '/dashboard',    label: 'Dashboard',    Icon: LayoutDashboardIcon, badge: 0,                              badgeColor: 'bg-red-500'   },
+    { to: '/relatorios',   label: 'Relatórios',   Icon: BarChart3Icon,       badge: 0,                              badgeColor: 'bg-red-500'   },
+    { to: '/configuracoes',label: 'Configurações',Icon: SettingsIcon,        badge: 0,                              badgeColor: 'bg-red-500'   },
   ]
 
   return (

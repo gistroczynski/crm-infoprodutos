@@ -3,6 +3,7 @@ import { pool } from '../db'
 import { formatarTelefone } from '../services/hotmart'
 import { upsertCliente, upsertProduto, upsertCompra, buscarProdutoPorHotmartId } from '../db/queries'
 import { reclassificarComprasCliente, lerValorMaximoOB } from '../services/classificarOrderBump'
+import { inscreverClienteNaTrilhaAutomaticamente } from '../services/cadencia'
 
 export const webhookRouter = Router()
 
@@ -99,6 +100,13 @@ webhookRouter.post('/hotmart', async (req: Request, res: Response) => {
       await reclassificarComprasCliente(clienteId, valorMaximoOB)
     } catch (err) {
       console.error('[Webhook] Erro ao reclassificar order bumps:', err)
+    }
+
+    // Inscreve na trilha de cadência correspondente ao produto
+    try {
+      await inscreverClienteNaTrilhaAutomaticamente(clienteId, produtoId)
+    } catch (err) {
+      console.error('[Webhook] Erro ao inscrever cliente na trilha:', err)
     }
 
     console.log(

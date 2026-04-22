@@ -9,6 +9,7 @@ import {
   buscarDataUltimaCompra,
 } from '../db/queries'
 import { reclassificarTodasCompras, lerValorMaximoOB } from '../services/classificarOrderBump'
+import { inscreverClienteNaTrilhaAutomaticamente } from '../services/cadencia'
 
 export interface SyncResult {
   inicio: string
@@ -59,6 +60,13 @@ async function processarVendas(
       })
       if (compraNova) resultado.compras.novas++
       else resultado.compras.atualizadas++
+
+      // Inscreve na trilha de cadência correspondente ao produto (apenas compras novas)
+      if (compraNova) {
+        inscreverClienteNaTrilhaAutomaticamente(clienteId, produtoId).catch(err =>
+          console.error('[Sync] Erro ao inscrever na trilha:', err)
+        )
+      }
 
     } catch (err) {
       const msg = `Venda ${venda.purchase.transaction}: ${String(err)}`

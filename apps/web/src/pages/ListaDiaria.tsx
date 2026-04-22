@@ -193,6 +193,7 @@ export default function ListaDiaria() {
             <tr className="border-b border-gray-100 bg-gray-50">
               <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Nome</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Produto</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Trilha</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Comprou há</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Status</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Prioridade</th>
@@ -260,6 +261,21 @@ export default function ListaDiaria() {
                     <p className="text-gray-700 max-w-[180px] truncate" title={item.produto_comprado ?? ''}>
                       {item.produto_comprado ?? '—'}
                     </p>
+                  </td>
+
+                  {/* Trilha de cadência */}
+                  <td className="px-4 py-3">
+                    {item.trilha_nome ? (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white whitespace-nowrap"
+                        style={{ backgroundColor: item.trilha_cor ?? '#6B7280' }}
+                        title={item.trilha_nome}
+                      >
+                        E{item.trilha_etapa}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300 text-xs">—</span>
+                    )}
                   </td>
 
                   {/* Tempo */}

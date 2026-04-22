@@ -38,6 +38,9 @@ export interface ItemLista {
   status_contato: StatusContato
   observacao: string | null
   contatado_em: string | null
+  trilha_nome: string | null
+  trilha_cor: string | null
+  trilha_etapa: number | null
 }
 
 export interface ListaHojeResponse {

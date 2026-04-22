@@ -292,6 +292,97 @@ export const syncApi = {
     ).then(r => r.data),
 }
 
+// ── Tipos cadências ─────────────────────────────────────────────────────────
+
+export interface ItemListaDiaCadencia {
+  id: string
+  cliente_id: string
+  cliente_nome: string
+  cliente_email: string
+  cliente_telefone: string | null
+  trilha_id: string
+  trilha_nome: string
+  trilha_cor: string
+  produto_entrada: string
+  etapa_atual: number
+  total_etapas: number
+  etapa_id: string
+  nome_etapa: string
+  dias_na_trilha: number
+  mensagem_do_dia: string
+  link_whatsapp: string | null
+  status: string
+}
+
+export interface TrilhaCadencia {
+  id: string
+  nome: string
+  descricao: string | null
+  ativa: boolean
+  cor: string
+  produto_entrada: string | null
+  produto_destino: string | null
+  total_etapas: number
+  clientes_ativos: number
+  clientes_convertidos: number
+  taxa_conversao: number
+}
+
+export interface EtapaCadencia {
+  id: string
+  trilha_id: string
+  numero_etapa: number
+  nome: string
+  dia_envio: number
+  mensagem_whatsapp: string
+  objetivo: string | null
+  ativa: boolean
+  ordem: number
+}
+
+export const cadenciasApi = {
+  listaDoDia: () =>
+    api.get<{ success: boolean; total: number; itens: ItemListaDiaCadencia[] }>(
+      '/api/cadencias/lista-do-dia'
+    ).then(r => r.data),
+
+  listaTrilhas: () =>
+    api.get<{ success: boolean; trilhas: TrilhaCadencia[] }>('/api/cadencias/trilhas').then(r => r.data),
+
+  getTrilha: (id: string) =>
+    api.get<{ success: boolean; trilha: TrilhaCadencia; etapas: EtapaCadencia[] }>(
+      `/api/cadencias/trilhas/${id}`
+    ).then(r => r.data),
+
+  atualizarEtapa: (id: string, dados: Partial<Pick<EtapaCadencia, 'nome' | 'mensagem_whatsapp' | 'objetivo'>>) =>
+    api.put<{ success: boolean }>(`/api/cadencias/etapas/${id}`, dados).then(r => r.data),
+
+  avancarEtapa: (clienteTrilhaId: string, statusContato: string, observacao?: string) =>
+    api.patch<{ success: boolean; proximo_status: string; data_proxima_etapa: string | null }>(
+      `/api/cadencias/clientes-trilha/${clienteTrilhaId}/avancar`,
+      { status_contato: statusContato, observacao }
+    ).then(r => r.data),
+
+  inscrever: (cliente_id: string, trilha_id: string) =>
+    api.post<{ success: boolean; id: string }>('/api/cadencias/clientes-trilha/inscrever', {
+      cliente_id, trilha_id,
+    }).then(r => r.data),
+
+  metricas: () =>
+    api.get<{
+      success: boolean
+      por_trilha: Array<{
+        trilha_id: string; trilha_nome: string; trilha_cor: string
+        total: number; ativos: number; convertidos: number; desistiram: number
+        concluidos: number; taxa_conversao: number; tempo_medio_dias: number | null
+      }>
+      por_etapa: Array<{
+        trilha_nome: string; etapa_numero: number; etapa_nome: string
+        total_chegaram: number; convertidos: number; desistiram: number
+      }>
+    }>('/api/cadencias/metricas').then(r => r.data),
+}
+
 export const vendasApi = {
   list: (params?: {
     inicio?: string; fim?: string

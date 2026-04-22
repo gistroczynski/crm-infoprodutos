@@ -20,6 +20,9 @@ export interface ItemListaDiaria {
   status_contato: string
   observacao: string | null
   contatado_em: string | null
+  trilha_nome: string | null
+  trilha_cor: string | null
+  trilha_etapa: number | null
 }
 
 export interface ListaHojeResult {
@@ -176,6 +179,9 @@ export async function buscarListaHoje(
     status_contato: string
     observacao: string | null
     contatado_em: string | null
+    trilha_nome: string | null
+    trilha_cor: string | null
+    trilha_etapa: number | null
   }>(`
     SELECT
       ld.id,
@@ -192,7 +198,10 @@ export async function buscarListaHoje(
       COALESCE(sc.status, 'novo')                 AS status,
       ld.status_contato,
       ld.observacao,
-      ld.contatado_em
+      ld.contatado_em,
+      t_cad.nome                                  AS trilha_nome,
+      t_cad.cor                                   AS trilha_cor,
+      ct_ativo.etapa_atual                        AS trilha_etapa
     FROM lista_diaria ld
     JOIN clientes c ON c.id = ld.cliente_id
     LEFT JOIN status_clientes sc ON sc.cliente_id = ld.cliente_id
@@ -205,6 +214,15 @@ export async function buscarListaHoje(
       LIMIT 1
     ) co_last ON true
     LEFT JOIN produtos p ON p.id = co_last.produto_id
+    -- trilha de cadência ativa (a mais recente, se houver)
+    LEFT JOIN LATERAL (
+      SELECT ct.trilha_id, ct.etapa_atual
+      FROM clientes_trilha ct
+      WHERE ct.cliente_id = ld.cliente_id AND ct.status = 'ativo'
+      ORDER BY ct.created_at DESC
+      LIMIT 1
+    ) ct_ativo ON true
+    LEFT JOIN trilhas_cadencia t_cad ON t_cad.id = ct_ativo.trilha_id
     WHERE ld.data = $1
     ${whereExtra}
     ORDER BY ld.score DESC
@@ -247,6 +265,9 @@ export async function buscarListaHoje(
         status_contato: row.status_contato,
         observacao: row.observacao,
         contatado_em: row.contatado_em,
+        trilha_nome:  row.trilha_nome  ?? null,
+        trilha_cor:   row.trilha_cor   ?? null,
+        trilha_etapa: row.trilha_etapa ?? null,
       }
     }))
     itens.push(...loteComLinks)

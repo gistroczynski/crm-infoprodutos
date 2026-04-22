@@ -10,7 +10,9 @@ listaDiariaRouter.get('/', async (req: Request, res: Response) => {
   try {
     const data = (req.query.data as string) ?? new Date().toISOString().slice(0, 10)
 
-    const rows = await query<ListaDiariaComCliente>(`
+    const rows = await query<ListaDiariaComCliente & {
+      trilha_nome: string | null; trilha_cor: string | null; trilha_etapa: number | null
+    }>(`
       SELECT
         ld.*,
         json_build_object(
@@ -18,9 +20,15 @@ listaDiariaRouter.get('/', async (req: Request, res: Response) => {
           'nome', c.nome,
           'email', c.email,
           'telefone_formatado', c.telefone_formatado
-        ) AS cliente
+        ) AS cliente,
+        t.nome  AS trilha_nome,
+        t.cor   AS trilha_cor,
+        ct.etapa_atual AS trilha_etapa
       FROM lista_diaria ld
       JOIN clientes c ON c.id = ld.cliente_id
+      LEFT JOIN clientes_trilha ct
+        ON ct.cliente_id = ld.cliente_id AND ct.status = 'ativo'
+      LEFT JOIN trilhas_cadencia t ON t.id = ct.trilha_id
       WHERE ld.data = $1
       ORDER BY ld.score DESC
     `, [data])

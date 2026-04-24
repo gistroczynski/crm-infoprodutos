@@ -95,7 +95,7 @@ async function processarWebhookPayload(payload: HotmartPayload): Promise<Webhook
   // Detecta se foi inscrito verificando existência na tabela
   const inscricaoTrilha = await queryOne<{ trilha_id: string }>(
     `SELECT trilha_id FROM clientes_trilha WHERE cliente_id = $1 AND trilha_id IN (
-       SELECT id FROM trilhas_cadencia WHERE produto_id = $2
+       SELECT id FROM trilhas_cadencia WHERE produto_entrada_id = $2
      ) LIMIT 1`,
     [clienteId, produtoId]
   )

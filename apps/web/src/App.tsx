@@ -20,7 +20,7 @@ export default function App() {
       <LoadingBar />
       <Routes>
         <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/lista-diaria" replace />} />
+          <Route index element={<Navigate to="/fluxo-ativo" replace />} />
           <Route path="lista-diaria" element={<ListaDiaria />} />
           <Route path="clientes" element={<Clientes />} />
           <Route path="clientes/:id" element={<Cliente />} />

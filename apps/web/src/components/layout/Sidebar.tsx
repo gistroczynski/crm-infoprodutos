@@ -3,7 +3,6 @@ import { NavLink } from 'react-router-dom'
 import { useToast } from '../../hooks/useToast'
 import api from '../../services/api'
 import {
-  ClipboardListIcon,
   UsersIcon,
   ShoppingCartIcon,
   LayoutDashboardIcon,
@@ -116,7 +115,6 @@ function tempoPassado(iso: string | null): string {
 
 export default function Sidebar() {
   const toast       = useToast()
-  const pending      = usePendingCount()
   const fluxoAtivo   = useFluxoAtivoCount()
   const reativacao   = useReativacaoCount()
   const vendasHoje   = useVendasHojeCount()
@@ -137,7 +135,6 @@ export default function Sidebar() {
   }
 
   const navItems = [
-    { to: '/lista-diaria',  label: 'Lista Diária',  Icon: ClipboardListIcon,   badge: pending     > 0 ? pending     : 0, badgeColor: 'bg-red-500'    },
     { to: '/fluxo-ativo',   label: 'Fluxo Ativo',   Icon: ZapIcon,             badge: fluxoAtivo  > 0 ? fluxoAtivo  : 0, badgeColor: 'bg-red-500'    },
     { to: '/reativacao',    label: 'Reativação',    Icon: RotateCcwIcon,       badge: reativacao  > 0 ? Math.min(reativacao, 9999) : 0, badgeColor: 'bg-orange-500' },
     { to: '/clientes',      label: 'Clientes',      Icon: UsersIcon,           badge: 0,                                 badgeColor: 'bg-red-500'    },

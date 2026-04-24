@@ -19,6 +19,7 @@ cadenciasRouter.get('/trilhas', async (_req: Request, res: Response) => {
       descricao: string | null
       ativa: boolean
       cor: string
+      tipo_pipeline: string
       produto_entrada: string | null
       produto_destino: string | null
       total_etapas: number
@@ -32,8 +33,9 @@ cadenciasRouter.get('/trilhas', async (_req: Request, res: Response) => {
         t.descricao,
         t.ativa,
         t.cor,
-        pe.nome                                                       AS produto_entrada,
-        pd.nome                                                       AS produto_destino,
+        COALESCE(t.tipo_pipeline, 'ativo') AS tipo_pipeline,
+        pe.nome                            AS produto_entrada,
+        pd.nome                            AS produto_destino,
         (SELECT COUNT(*)::int FROM etapas_cadencia WHERE trilha_id = t.id AND ativa = true)
                                                                       AS total_etapas,
         COUNT(CASE WHEN ct.status = 'ativo'      THEN 1 END)::int    AS clientes_ativos,

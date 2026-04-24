@@ -24,21 +24,70 @@ export interface ItemListaDia {
 
 // ── Inscrição automática ───────────────────────────────────────────────────
 
+// Remove prefixos comuns de produtos da Hotmart para comparação por nome.
+// Ex: "CD - A fraqueza masculina..." → "a fraqueza masculina..."
+function normalizarNomeProduto(nome: string): string {
+  return nome
+    .replace(/^(cd|e-?book|ebook|gravação do workshop|gravacao do workshop|workshop|masterclass|desafio|programa|combo)[\s:–\-]*/gi, '')
+    .trim()
+    .toLowerCase()
+    .substring(0, 30)
+}
+
 /**
  * Inscreve o cliente na trilha correspondente ao produto comprado, se existir.
  * Idempotente: ignora se o cliente já está inscrito nessa trilha.
+ *
+ * Estratégia em 2 passos:
+ * 1. Busca direta pelo produto_entrada_id (match exato por UUID)
+ * 2. Fallback por nome normalizado — cobre casos onde o mesmo produto tem
+ *    múltiplos hotmart_ids (variantes de SKU) e a trilha está vinculada a
+ *    um UUID diferente do que chegou no webhook.
  */
 export async function inscreverClienteNaTrilhaAutomaticamente(
   clienteId: string,
   produtoId: string
 ): Promise<void> {
-  const trilha = await queryOne<{ id: string }>(`
+  // 1. Busca direta
+  let trilha = await queryOne<{ id: string }>(`
     SELECT id FROM trilhas_cadencia
     WHERE produto_entrada_id = $1 AND ativa = true
     LIMIT 1
   `, [produtoId])
 
-  if (!trilha) return
+  console.log(`[Cadencia] produto_id=${produtoId} match_direto=${trilha ? trilha.id : 'não'}`)
+
+  // 2. Fallback por nome — o banco tem produtos duplicados com hotmart_ids distintos
+  if (!trilha) {
+    const produto = await queryOne<{ nome: string }>(
+      'SELECT nome FROM produtos WHERE id = $1', [produtoId]
+    )
+    if (produto) {
+      const nomeNorm   = normalizarNomeProduto(produto.nome)
+      const nomePrefixo = produto.nome.toLowerCase().substring(0, 20)
+      console.log(`[Cadencia] Fallback por nome: "${produto.nome}" → norm="${nomeNorm}"`)
+
+      if (nomeNorm.length >= 6) {
+        trilha = await queryOne<{ id: string }>(`
+          SELECT tc.id FROM trilhas_cadencia tc
+          JOIN produtos pe ON pe.id = tc.produto_entrada_id
+          WHERE tc.ativa = true
+            AND (
+              LOWER(pe.nome) LIKE $1
+              OR LOWER(pe.nome) LIKE $2
+            )
+          LIMIT 1
+        `, [`%${nomeNorm}%`, `%${nomePrefixo}%`])
+
+        console.log(`[Cadencia] Fallback resultado: ${trilha ? trilha.id : 'nenhuma trilha encontrada'}`)
+      }
+    }
+  }
+
+  if (!trilha) {
+    console.log(`[Cadencia] Nenhuma trilha para produto_id=${produtoId} — cliente não inscrito`)
+    return
+  }
 
   // Busca etapa 1 para calcular data_proxima_etapa
   const etapa1 = await queryOne<{ dia_envio: number }>(`
@@ -53,6 +102,8 @@ export async function inscreverClienteNaTrilhaAutomaticamente(
     VALUES ($1, $2, 1, NOW() + ($3 || ' days')::interval)
     ON CONFLICT (cliente_id, trilha_id) DO NOTHING
   `, [clienteId, trilha.id, diasEtapa1])
+
+  console.log(`[Cadencia] Cliente ${clienteId} inscrito na trilha ${trilha.id}`)
 }
 
 // ── Lista do dia ───────────────────────────────────────────────────────────

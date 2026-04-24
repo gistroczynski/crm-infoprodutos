@@ -59,6 +59,68 @@ cadenciasRouter.get('/trilhas', async (_req: Request, res: Response) => {
   }
 })
 
+// ── GET /api/cadencias/diagnostico/:produtoId ─────────────────────────────
+// Verifica se existe trilha vinculada ao produto, tanto por match direto
+// (produto_entrada_id) quanto por nome similar (fallback do webhook).
+cadenciasRouter.get('/diagnostico/:produtoId', async (req: Request, res: Response) => {
+  try {
+    const { produtoId } = req.params
+
+    // Produto recebido
+    const produto = await queryOne<{ id: string; nome: string; hotmart_id: string | null }>(
+      'SELECT id, nome, hotmart_id FROM produtos WHERE id = $1', [produtoId]
+    )
+    if (!produto) return res.status(404).json({ error: 'Produto não encontrado' })
+
+    // Match direto
+    const matchDireto = await queryOne<{ trilha_id: string; trilha_nome: string }>(`
+      SELECT t.id AS trilha_id, t.nome AS trilha_nome
+      FROM trilhas_cadencia t
+      WHERE t.produto_entrada_id = $1 AND t.ativa = true
+      LIMIT 1
+    `, [produtoId])
+
+    // Match por nome (mesmo fallback usado no webhook)
+    const nomeNorm    = produto.nome.replace(/^(cd|e-?book|ebook|gravação do workshop|gravacao do workshop|workshop|masterclass|desafio|programa|combo)[\s:–\-]*/gi, '').trim().toLowerCase().substring(0, 30)
+    const nomePrefixo = produto.nome.toLowerCase().substring(0, 20)
+
+    const matchNome = nomeNorm.length >= 6
+      ? await queryOne<{ trilha_id: string; trilha_nome: string; produto_entrada: string }>(`
+          SELECT tc.id AS trilha_id, tc.nome AS trilha_nome, pe.nome AS produto_entrada
+          FROM trilhas_cadencia tc
+          JOIN produtos pe ON pe.id = tc.produto_entrada_id
+          WHERE tc.ativa = true
+            AND (LOWER(pe.nome) LIKE $1 OR LOWER(pe.nome) LIKE $2)
+          LIMIT 1
+        `, [`%${nomeNorm}%`, `%${nomePrefixo}%`])
+      : null
+
+    // Todos os vínculos diretos de trilhas ativas
+    const todasTrilhas = await query<{
+      trilha_nome: string
+      produto_entrada_id: string | null
+      produto_entrada_nome: string | null
+    }>(`
+      SELECT t.nome AS trilha_nome, t.produto_entrada_id, pe.nome AS produto_entrada_nome
+      FROM trilhas_cadencia t
+      LEFT JOIN produtos pe ON pe.id = t.produto_entrada_id
+      WHERE t.ativa = true
+      ORDER BY t.tipo_pipeline, t.nome
+    `)
+
+    res.json({
+      produto: { id: produto.id, nome: produto.nome, hotmart_id: produto.hotmart_id },
+      nome_normalizado: nomeNorm,
+      match_direto:  matchDireto  ?? null,
+      match_por_nome: matchNome   ?? null,
+      sera_inscrito:  !!(matchDireto || matchNome),
+      todas_trilhas_ativas: todasTrilhas,
+    })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+})
+
 // ── GET /api/cadencias/trilhas/:id ────────────────────────────────────────
 cadenciasRouter.get('/trilhas/:id', async (req: Request, res: Response) => {
   try {

@@ -21,6 +21,9 @@ import { vendasRouter } from './routes/vendas'
 import { cadenciasRouter } from './routes/cadencias'
 import { reativacaoRouter } from './routes/reativacao'
 import { errorHandler } from './middleware/errorHandler'
+import { authMiddleware } from './middleware/auth'
+import { apenasAdmin } from './middleware/perfil'
+import { authRouter } from './routes/auth'
 import { executarSync } from './jobs/sync'
 import { executarGeracaoLista } from './jobs/lista'
 import { executarListaReativacao, executarPopularFilaReativacao } from './jobs/cadencia'
@@ -112,6 +115,12 @@ app.get('/health', async (_req, res) => {
   })
 })
 
+// ── Auth (público — antes do middleware JWT) ────────────────────────────────
+app.use('/api/auth', authRouter)
+
+// ── JWT em todas as rotas protegidas ───────────────────────────────────────
+app.use(authMiddleware)
+
 // ── Routes ─────────────────────────────────────────────────────────────────
 app.use('/api/clientes', clientesRouter)
 app.use('/api/lista-diaria', listaDiariaRouter)
@@ -123,7 +132,7 @@ app.use('/api/lista', listaRouter)
 app.use('/api/webhook', webhookRouter)
 app.use('/api/clientes/importar-csv', importarCsvRouter)
 app.use('/api/debug', debugRouter)
-app.use('/api/relatorios', relatoriosRouter)
+app.use('/api/relatorios', apenasAdmin, relatoriosRouter)
 app.use('/api/vendas', vendasRouter)
 app.use('/api/cadencias', cadenciasRouter)
 app.use('/api/reativacao', reativacaoRouter)

@@ -2,6 +2,9 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { ToastProvider } from './components/Toast'
 import LoadingBar from './components/LoadingBar'
 import Layout from './components/layout/Layout'
+import { AuthProvider } from './contexts/AuthContext'
+import { ProtectedRoute } from './components/auth/ProtectedRoute'
+import Login from './pages/Login'
 import ListaDiaria from './pages/ListaDiaria'
 import Clientes from './pages/Clientes'
 import Cliente from './pages/Cliente'
@@ -16,24 +19,41 @@ import Erro404 from './pages/Erro404'
 
 export default function App() {
   return (
-    <ToastProvider>
-      <LoadingBar />
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/fluxo-ativo" replace />} />
-          <Route path="lista-diaria" element={<ListaDiaria />} />
-          <Route path="clientes" element={<Clientes />} />
-          <Route path="clientes/:id" element={<Cliente />} />
-          <Route path="vendas" element={<Vendas />} />
-          <Route path="cadencias" element={<Cadencias />} />
-          <Route path="fluxo-ativo" element={<FluxoAtivo />} />
-          <Route path="reativacao" element={<Reativacao />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="relatorios" element={<Relatorios />} />
-          <Route path="configuracoes" element={<Configuracoes />} />
-          <Route path="*" element={<Erro404 />} />
-        </Route>
-      </Routes>
-    </ToastProvider>
+    <AuthProvider>
+      <ToastProvider>
+        <LoadingBar />
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Navigate to="/fluxo-ativo" replace />} />
+            <Route path="lista-diaria" element={<ListaDiaria />} />
+            <Route path="clientes" element={<Clientes />} />
+            <Route path="clientes/:id" element={<Cliente />} />
+            <Route path="vendas" element={<Vendas />} />
+            <Route path="cadencias" element={<Cadencias />} />
+            <Route path="fluxo-ativo" element={<FluxoAtivo />} />
+            <Route path="reativacao" element={<Reativacao />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route
+              path="relatorios"
+              element={
+                <ProtectedRoute apenasAdmin>
+                  <Relatorios />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="configuracoes" element={<Configuracoes />} />
+            <Route path="*" element={<Erro404 />} />
+          </Route>
+        </Routes>
+      </ToastProvider>
+    </AuthProvider>
   )
 }

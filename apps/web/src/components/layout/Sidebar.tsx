@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { useToast } from '../../hooks/useToast'
+import { useAuth } from '../../contexts/AuthContext'
 import api from '../../services/api'
+import logoOgc from '../../assets/logo-ogc.svg'
 import {
   UsersIcon,
   ShoppingCartIcon,
@@ -13,23 +15,6 @@ import {
 } from './icons'
 
 // ── Hooks internos ─────────────────────────────────────────────────────────
-
-function usePendingCount() {
-  const [count, setCount] = useState(0)
-
-  useEffect(() => {
-    const fetch = () => {
-      api.get<{ itens: { status_contato: string }[] }>('/api/lista/hoje')
-        .then(r => setCount(r.data.itens.filter(i => i.status_contato === 'pendente').length))
-        .catch(() => {})
-    }
-    fetch()
-    const interval = setInterval(fetch, 5 * 60 * 1000)
-    return () => clearInterval(interval)
-  }, [])
-
-  return count
-}
 
 function useFluxoAtivoCount() {
   const [count, setCount] = useState(0)
@@ -63,7 +48,6 @@ function useReativacaoCount() {
 
 function useVendasHojeCount() {
   const [count, setCount] = useState(0)
-
   useEffect(() => {
     const fetch = () => {
       api.get<{ total_hoje: number }>('/api/vendas/hoje')
@@ -74,7 +58,6 @@ function useVendasHojeCount() {
     const interval = setInterval(fetch, 5 * 60 * 1000)
     return () => clearInterval(interval)
   }, [])
-
   return count
 }
 
@@ -114,10 +97,12 @@ function tempoPassado(iso: string | null): string {
 // ── Componente ─────────────────────────────────────────────────────────────
 
 export default function Sidebar() {
-  const toast       = useToast()
-  const fluxoAtivo   = useFluxoAtivoCount()
-  const reativacao   = useReativacaoCount()
-  const vendasHoje   = useVendasHojeCount()
+  const toast            = useToast()
+  const { usuario, logout } = useAuth()
+  const navigate         = useNavigate()
+  const fluxoAtivo       = useFluxoAtivoCount()
+  const reativacao       = useReativacaoCount()
+  const vendasHoje       = useVendasHojeCount()
   const { ultimaSync, emAndamento, refetch } = useSyncStatus()
   const [syncing, setSyncing] = useState(false)
 
@@ -134,26 +119,34 @@ export default function Sidebar() {
     }
   }
 
+  function handleLogout() {
+    logout()
+    navigate('/login', { replace: true })
+  }
+
   const navItems = [
-    { to: '/fluxo-ativo',   label: 'Fluxo Ativo',   Icon: ZapIcon,             badge: fluxoAtivo  > 0 ? fluxoAtivo  : 0, badgeColor: 'bg-red-500'    },
-    { to: '/reativacao',    label: 'Reativação',    Icon: RotateCcwIcon,       badge: reativacao  > 0 ? Math.min(reativacao, 9999) : 0, badgeColor: 'bg-orange-500' },
-    { to: '/clientes',      label: 'Clientes',      Icon: UsersIcon,           badge: 0,                                 badgeColor: 'bg-red-500'    },
-    { to: '/vendas',        label: 'Vendas',        Icon: ShoppingCartIcon,    badge: vendasHoje  > 0 ? vendasHoje  : 0, badgeColor: 'bg-green-500'  },
-    { to: '/dashboard',     label: 'Dashboard',     Icon: LayoutDashboardIcon, badge: 0,                                 badgeColor: 'bg-red-500'    },
-    { to: '/relatorios',    label: 'Relatórios',    Icon: BarChart3Icon,       badge: 0,                                 badgeColor: 'bg-red-500'    },
-    { to: '/configuracoes', label: 'Configurações', Icon: SettingsIcon,        badge: 0,                                 badgeColor: 'bg-red-500'    },
+    { to: '/fluxo-ativo',   label: 'Fluxo Ativo',   Icon: ZapIcon,             badge: fluxoAtivo  > 0 ? fluxoAtivo  : 0 },
+    { to: '/reativacao',    label: 'Reativação',    Icon: RotateCcwIcon,       badge: reativacao  > 0 ? Math.min(reativacao, 9999) : 0 },
+    { to: '/clientes',      label: 'Clientes',      Icon: UsersIcon,           badge: 0 },
+    { to: '/vendas',        label: 'Vendas',        Icon: ShoppingCartIcon,    badge: vendasHoje  > 0 ? vendasHoje  : 0 },
+    { to: '/dashboard',     label: 'Dashboard',     Icon: LayoutDashboardIcon, badge: 0 },
+    ...(usuario?.perfil === 'admin'
+      ? [{ to: '/relatorios', label: 'Relatórios', Icon: BarChart3Icon, badge: 0 }]
+      : []),
+    { to: '/configuracoes', label: 'Configurações', Icon: SettingsIcon,        badge: 0 },
   ]
 
   return (
-    <aside className="w-60 bg-white border-r border-gray-200 flex flex-col">
+    <aside className="w-60 bg-[#111111] flex flex-col">
       {/* Logo */}
-      <div className="h-16 flex items-center px-6 border-b border-gray-200">
-        <span className="text-lg font-bold text-primary-600">CRM Infoprodutos</span>
+      <div className="h-16 flex items-center gap-3 px-5 border-b border-white/10">
+        <img src={logoOgc} alt="OGC" className="w-8 h-8 flex-shrink-0" />
+        <span className="text-white font-bold text-base tracking-wide">CRM OGC</span>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {navItems.map(({ to, label, Icon, badge, badgeColor }) => (
+      <nav className="flex-1 px-3 py-4 space-y-0.5">
+        {navItems.map(({ to, label, Icon, badge }) => (
           <NavLink
             key={to}
             to={to}
@@ -161,15 +154,15 @@ export default function Sidebar() {
               [
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
                 isActive
-                  ? 'bg-primary-50 text-primary-700'
-                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+                  ? 'bg-[#D2191F] text-white'
+                  : 'text-gray-400 hover:bg-white/8 hover:text-white',
               ].join(' ')
             }
           >
-            <Icon className="h-5 w-5 flex-shrink-0" />
+            <Icon className="h-4.5 w-4.5 flex-shrink-0" />
             <span className="flex-1">{label}</span>
             {badge > 0 && (
-              <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold ${badgeColor} text-white`}>
+              <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-white/20 text-white">
                 {badge > 99 ? '99+' : badge}
               </span>
             )}
@@ -177,14 +170,15 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer — última sync */}
-      <div className="px-4 py-3 border-t border-gray-200 space-y-1.5">
+      {/* Sync + usuário */}
+      <div className="px-4 py-3 border-t border-white/10 space-y-3">
+        {/* Última sync */}
         <div className="flex items-center justify-between">
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Última sync</p>
+            <p className="text-[10px] font-semibold text-gray-600 uppercase tracking-wide">Última sync</p>
             <p className="text-xs text-gray-500 truncate">
               {emAndamento ? (
-                <span className="text-primary-500 font-medium">Em andamento...</span>
+                <span className="text-[#D2191F] font-medium">Em andamento...</span>
               ) : (
                 tempoPassado(ultimaSync)
               )}
@@ -194,7 +188,7 @@ export default function Sidebar() {
             onClick={triggerSync}
             disabled={syncing || emAndamento}
             title="Sincronizar com Hotmart"
-            className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 disabled:opacity-40 transition-colors flex-shrink-0"
+            className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 disabled:opacity-40 transition-colors flex-shrink-0"
           >
             <svg
               className={`w-3.5 h-3.5 ${(syncing || emAndamento) ? 'animate-spin' : ''}`}
@@ -204,7 +198,30 @@ export default function Sidebar() {
             </svg>
           </button>
         </div>
-        <p className="text-[10px] text-gray-300">v1.0.0</p>
+
+        {/* Usuário + logout */}
+        {usuario && (
+          <div className="flex items-center gap-2 pt-1 border-t border-white/10">
+            <div className="w-7 h-7 rounded-full bg-[#D2191F] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+              {usuario.nome.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-white font-medium truncate">{usuario.nome}</p>
+              <span className={`text-[10px] font-semibold uppercase tracking-wide ${usuario.perfil === 'admin' ? 'text-[#D2191F]' : 'text-gray-500'}`}>
+                {usuario.perfil}
+              </span>
+            </div>
+            <button
+              onClick={handleLogout}
+              title="Sair"
+              className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   )

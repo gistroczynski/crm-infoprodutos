@@ -13,12 +13,26 @@ const api = axios.create({
 })
 
 api.interceptors.request.use(
-  config  => { incrementLoading(); return config },
-  error   => { decrementLoading(); return Promise.reject(error) },
+  config => {
+    incrementLoading()
+    const token = localStorage.getItem('auth-token')
+    if (token && !config.headers['Authorization']) {
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
+    return config
+  },
+  error => { decrementLoading(); return Promise.reject(error) },
 )
 api.interceptors.response.use(
   response => { decrementLoading(); return response },
-  error    => { decrementLoading(); return Promise.reject(error) },
+  error => {
+    decrementLoading()
+    if (error?.response?.status === 401 && !window.location.pathname.includes('/login')) {
+      localStorage.removeItem('auth-token')
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  },
 )
 
 // ── Clientes ──────────────────────────────────────────────────────────────

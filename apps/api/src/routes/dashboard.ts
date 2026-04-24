@@ -34,6 +34,7 @@ async function readFunilConfig() {
 
 /**
  * Conta clientes DISTINCT e soma receita de compras no período.
+ * Usa DISTINCT ON (hotmart_transaction_id) para evitar duplicatas.
  * Se ids.length > 0 filtra por produto_id IN ids; senão usa coluna tipo.
  */
 async function buscarEtapaFunil(
@@ -45,26 +46,38 @@ async function buscarEtapaFunil(
   if (ids.length > 0) {
     const row = await queryOne<{ total_clientes: number; receita: number }>(`
       SELECT
-        COUNT(DISTINCT co.cliente_id)::int         AS total_clientes,
-        COALESCE(SUM(co.valor::numeric), 0)::float AS receita
-      FROM compras co
-      WHERE co.status IN ('COMPLETE', 'APPROVED')
-        AND co.produto_id = ANY($1::uuid[])
-        AND co.data_compra::date >= $2::date
-        AND co.data_compra::date <= $3::date
+        COUNT(DISTINCT t.cliente_id)::int         AS total_clientes,
+        COALESCE(SUM(t.valor), 0)::float           AS receita
+      FROM (
+        SELECT DISTINCT ON (COALESCE(co.hotmart_transaction_id, co.id::text))
+          co.cliente_id,
+          co.valor::numeric AS valor
+        FROM compras co
+        WHERE co.status IN ('COMPLETE', 'APPROVED')
+          AND co.produto_id = ANY($1::uuid[])
+          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
+          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
+        ORDER BY COALESCE(co.hotmart_transaction_id, co.id::text), co.id
+      ) t
     `, [ids, inicio, fim])
     return row ?? { total_clientes: 0, receita: 0 }
   }
   const row = await queryOne<{ total_clientes: number; receita: number }>(`
     SELECT
-      COUNT(DISTINCT co.cliente_id)::int         AS total_clientes,
-      COALESCE(SUM(co.valor::numeric), 0)::float AS receita
-    FROM compras co
-    JOIN produtos p ON p.id = co.produto_id
-    WHERE co.status IN ('COMPLETE', 'APPROVED')
-      AND COALESCE(p.tipo, 'entrada') = $1
-      AND co.data_compra::date >= $2::date
-      AND co.data_compra::date <= $3::date
+      COUNT(DISTINCT t.cliente_id)::int         AS total_clientes,
+      COALESCE(SUM(t.valor), 0)::float           AS receita
+    FROM (
+      SELECT DISTINCT ON (COALESCE(co.hotmart_transaction_id, co.id::text))
+        co.cliente_id,
+        co.valor::numeric AS valor
+      FROM compras co
+      JOIN produtos p ON p.id = co.produto_id
+      WHERE co.status IN ('COMPLETE', 'APPROVED')
+        AND COALESCE(p.tipo, 'entrada') = $1
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
+      ORDER BY COALESCE(co.hotmart_transaction_id, co.id::text), co.id
+    ) t
   `, [tipoFallback, inicio, fim])
   return row ?? { total_clientes: 0, receita: 0 }
 }
@@ -105,17 +118,22 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
 
     const [periodo, porProduto, clientes] = await Promise.all([
 
-      // Faturamento + compras no período
+      // Faturamento + compras no período — deduplicado por transaction_id
       queryOne<{ faturamento: number; total_compras: number; ticket_medio: number }>(`
         SELECT
-          COALESCE(SUM(valor::numeric), 0)::float   AS faturamento,
-          COUNT(*)::int                              AS total_compras,
-          COALESCE(AVG(valor::numeric), 0)::float   AS ticket_medio
-        FROM compras
-        WHERE status IN ('COMPLETE', 'APPROVED')
-          AND valor IS NOT NULL
-          AND data_compra::date >= $1::date
-          AND data_compra::date <= $2::date
+          COALESCE(SUM(v.valor), 0)::float   AS faturamento,
+          COUNT(*)::int                       AS total_compras,
+          COALESCE(AVG(v.valor), 0)::float   AS ticket_medio
+        FROM (
+          SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
+            valor::numeric AS valor
+          FROM compras
+          WHERE status IN ('COMPLETE', 'APPROVED')
+            AND valor IS NOT NULL
+            AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+            AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+          ORDER BY COALESCE(hotmart_transaction_id, id::text), id
+        ) v
       `, [inicio, fim]),
 
       // Top produtos no período — INNER JOIN para garantir sem duplicatas
@@ -229,20 +247,81 @@ dashboardRouter.get('/evolucao', async (req: Request, res: Response) => {
     const rows = await query<{ data: string; receita: number; novas_compras: number }>(`
       WITH serie AS (
         SELECT generate_series($1::date, $2::date, '1 day'::interval)::date AS data
+      ),
+      compras_unicas AS (
+        SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
+          (data_compra AT TIME ZONE 'America/Sao_Paulo')::date AS data_compra,
+          valor::numeric AS valor
+        FROM compras
+        WHERE status IN ('COMPLETE', 'APPROVED')
+          AND valor IS NOT NULL
+        ORDER BY COALESCE(hotmart_transaction_id, id::text), id
       )
       SELECT
         s.data::text,
-        COALESCE(SUM(co.valor::numeric), 0)::float AS receita,
-        COUNT(co.id)::int                          AS novas_compras
+        COALESCE(SUM(cu.valor), 0)::float AS receita,
+        COUNT(cu.valor)::int              AS novas_compras
       FROM serie s
-      LEFT JOIN compras co
-        ON co.data_compra::date = s.data
-        AND co.status IN ('COMPLETE', 'APPROVED')
-        AND co.valor IS NOT NULL
+      LEFT JOIN compras_unicas cu ON cu.data_compra = s.data
       GROUP BY s.data
       ORDER BY s.data ASC
     `, [inicio, fim])
 
     res.json(rows)
+  } catch (err) { res.status(500).json({ error: String(err) }) }
+})
+
+// ── GET /api/dashboard/diagnostico-faturamento ────────────────────────────
+dashboardRouter.get('/diagnostico-faturamento', async (req: Request, res: Response) => {
+  try {
+    const { inicio, fim } = parseDateRange(req)
+
+    const [bruto, deduplicado, duplicatas] = await Promise.all([
+      queryOne<{ total: number; receita: number }>(`
+        SELECT COUNT(*)::int AS total, COALESCE(SUM(valor::numeric),0)::float AS receita
+        FROM compras
+        WHERE status IN ('COMPLETE','APPROVED') AND valor IS NOT NULL
+          AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+          AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+      `, [inicio, fim]),
+
+      queryOne<{ total: number; receita: number }>(`
+        SELECT COUNT(*)::int AS total, COALESCE(SUM(v.valor),0)::float AS receita
+        FROM (
+          SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
+            valor::numeric AS valor
+          FROM compras
+          WHERE status IN ('COMPLETE','APPROVED') AND valor IS NOT NULL
+            AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+            AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+          ORDER BY COALESCE(hotmart_transaction_id, id::text), id
+        ) v
+      `, [inicio, fim]),
+
+      query<{ transaction_id: string; ocorrencias: number; valor_total: number }>(`
+        SELECT
+          hotmart_transaction_id AS transaction_id,
+          COUNT(*)::int          AS ocorrencias,
+          SUM(valor::numeric)::float AS valor_total
+        FROM compras
+        WHERE status IN ('COMPLETE','APPROVED') AND valor IS NOT NULL
+          AND hotmart_transaction_id IS NOT NULL
+          AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+          AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+        GROUP BY hotmart_transaction_id
+        HAVING COUNT(*) > 1
+        ORDER BY ocorrencias DESC
+        LIMIT 20
+      `, [inicio, fim]),
+    ])
+
+    res.json({
+      periodo: { inicio, fim },
+      bruto:        { total_compras: bruto?.total ?? 0,        receita: bruto?.receita ?? 0 },
+      deduplicado:  { total_compras: deduplicado?.total ?? 0,  receita: deduplicado?.receita ?? 0 },
+      diferenca_receita: (bruto?.receita ?? 0) - (deduplicado?.receita ?? 0),
+      transacoes_duplicadas: duplicatas.length,
+      exemplos_duplicatas: duplicatas.slice(0, 10),
+    })
   } catch (err) { res.status(500).json({ error: String(err) }) }
 })

@@ -26,7 +26,7 @@ function normalizar(str: string): string {
     .toLowerCase()
     .trim()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')  // remove diacríticos
+    .replace(/[̀-ͯ]/g, '')  // remove diacríticos
     .replace(/[^a-z0-9 ]/g, ' ')     // substitui especiais (-, _, etc.) por espaço
     .replace(/\s+/g, ' ')
     .trim()
@@ -45,29 +45,114 @@ const MAPA_TELEFONE = new Set([
   'tel', 'fone',
 ])
 
+const MAPA_DDD = new Set([
+  'ddd', 'codigo de area', 'cod area', 'area code',
+])
+
 const MAPA_NOME = new Set([
   'nome', 'nome do comprador', 'comprador', 'nome do cliente',
   'buyer name', 'buyer', 'name', 'client name', 'cliente',
   'nome completo', 'full name',
 ])
 
+const MAPA_STATUS = new Set([
+  'status', 'status da venda', 'status do pedido', 'transaction status',
+])
+
+const MAPA_PRODUTO_NOME = new Set([
+  'nome do produto', 'produto', 'product name', 'product', 'nome produto',
+  'item', 'descricao', 'description',
+])
+
+const MAPA_DATA_VENDA = new Set([
+  'data de venda', 'data da venda', 'data compra', 'data da compra',
+  'purchase date', 'sale date', 'data',
+])
+
+const MAPA_PRECO = new Set([
+  'preco da oferta', 'preco', 'valor', 'price', 'offer price',
+  'valor da venda', 'valor do produto', 'amount',
+])
+
 function detectarColunas(cabecalhos: string[]): {
-  emailCol: string | null
-  telefoneCol: string | null
-  nomeCol: string | null
+  emailCol:       string | null
+  telefoneCol:    string | null
+  dddCol:         string | null
+  nomeCol:        string | null
+  statusCol:      string | null
+  produtoNomeCol: string | null
+  dataVendaCol:   string | null
+  precoCol:       string | null
 } {
-  let emailCol:    string | null = null
-  let telefoneCol: string | null = null
-  let nomeCol:     string | null = null
+  let emailCol:       string | null = null
+  let telefoneCol:    string | null = null
+  let dddCol:         string | null = null
+  let nomeCol:        string | null = null
+  let statusCol:      string | null = null
+  let produtoNomeCol: string | null = null
+  let dataVendaCol:   string | null = null
+  let precoCol:       string | null = null
 
   for (const h of cabecalhos) {
     const n = normalizar(h)
-    if (!emailCol    && MAPA_EMAIL.has(n))    emailCol    = h
-    if (!telefoneCol && MAPA_TELEFONE.has(n)) telefoneCol = h
-    if (!nomeCol     && MAPA_NOME.has(n))     nomeCol     = h
+    if (!emailCol       && MAPA_EMAIL.has(n))        emailCol       = h
+    if (!telefoneCol    && MAPA_TELEFONE.has(n))     telefoneCol    = h
+    if (!dddCol         && MAPA_DDD.has(n))          dddCol         = h
+    if (!nomeCol        && MAPA_NOME.has(n))         nomeCol        = h
+    if (!statusCol      && MAPA_STATUS.has(n))       statusCol      = h
+    if (!produtoNomeCol && MAPA_PRODUTO_NOME.has(n)) produtoNomeCol = h
+    if (!dataVendaCol   && MAPA_DATA_VENDA.has(n))   dataVendaCol   = h
+    if (!precoCol       && MAPA_PRECO.has(n))        precoCol       = h
   }
 
-  return { emailCol, telefoneCol, nomeCol }
+  return { emailCol, telefoneCol, dddCol, nomeCol, statusCol, produtoNomeCol, dataVendaCol, precoCol }
+}
+
+// ── Helpers para dados da Hotmart ──────────────────────────────────────────
+
+function isStatusAprovado(statusVal: string): boolean {
+  const s = statusVal.trim().toUpperCase()
+  return s === 'COMPLETE' || s === 'APROVADO' || s === 'APPROVED'
+}
+
+function combinarDddTelefone(
+  linha: Record<string, string>,
+  dddCol: string | null,
+  telefoneCol: string | null,
+): string {
+  const tel = telefoneCol ? (linha[telefoneCol]?.trim() || '') : ''
+  if (!tel) return ''
+  if (dddCol) {
+    const ddd = linha[dddCol]?.trim() || ''
+    return ddd + tel
+  }
+  return tel
+}
+
+function parsearPreco(precoStr: string): number | null {
+  if (!precoStr) return null
+  // Remove "R$", pontos de milhar, troca vírgula por ponto
+  const limpo = precoStr
+    .replace(/R\$\s*/g, '')
+    .replace(/\./g, '')
+    .replace(',', '.')
+    .trim()
+  const n = parseFloat(limpo)
+  return isNaN(n) ? null : n
+}
+
+function parsearData(dataStr: string): Date | null {
+  if (!dataStr) return null
+  // dd/mm/yyyy ou dd/mm/yyyy HH:MM
+  const brMatch = dataStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  if (brMatch) {
+    const [, d, m, y] = brMatch
+    const dt = new Date(`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`)
+    return isNaN(dt.getTime()) ? null : dt
+  }
+  // ISO ou outros formatos que Date consegue parsear
+  const dt = new Date(dataStr)
+  return isNaN(dt.getTime()) ? null : dt
 }
 
 // ── Detecção de encoding ───────────────────────────────────────────────────
@@ -75,13 +160,13 @@ function detectarColunas(cabecalhos: string[]): {
 function decodificarBuffer(buf: Buffer): { texto: string; encoding: string } {
   // UTF-8 BOM (EF BB BF)
   if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
-    return { texto: buf.toString('utf8').replace(/^\uFEFF/, ''), encoding: 'UTF-8 BOM' }
+    return { texto: buf.toString('utf8').replace(/^﻿/, ''), encoding: 'UTF-8 BOM' }
   }
 
   // Tenta UTF-8: se não houver caractere de substituição, é UTF-8 válido
   const utf8 = buf.toString('utf8')
-  if (!utf8.includes('\uFFFD')) {
-    return { texto: utf8.replace(/^\uFEFF/, ''), encoding: 'UTF-8' }
+  if (!utf8.includes('�')) {
+    return { texto: utf8.replace(/^﻿/, ''), encoding: 'UTF-8' }
   }
 
   // Fallback: Latin-1 / ISO-8859-1 (Node.js suporta nativamente via 'latin1')
@@ -141,14 +226,13 @@ importarCsvRouter.get('/template', (_req: Request, res: Response) => {
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8')
   res.setHeader('Content-Disposition', 'attachment; filename="modelo-telefones.csv"')
-  res.send('\uFEFF' + csv)
+  res.send('﻿' + csv)
 })
 
 // ── Contagem total de linhas sem parsear ────────────────────────────────────
 
 function contarLinhasCsv(buffer: Buffer): number {
   const { texto } = decodificarBuffer(buffer)
-  // Conta linhas não-vazias excluindo o cabeçalho
   const linhas = texto.split(/\r?\n/).filter(l => l.trim().length > 0)
   return Math.max(0, linhas.length - 1) // subtrai cabeçalho
 }
@@ -159,21 +243,27 @@ importarCsvRouter.post('/preview', upload.single('arquivo'), async (req: Request
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' })
 
   try {
-    // Limita a 200 linhas no preview — suficiente para detectar colunas, muito mais rápido em arquivos grandes
     const totalLinhas = contarLinhasCsv(req.file.buffer)
     const { registros, encoding, separador } = await parsearCsv(req.file.buffer, 200)
     const cabecalhos = Object.keys(registros[0] ?? {})
-    const { emailCol, telefoneCol } = detectarColunas(cabecalhos)
+    const cols = detectarColunas(cabecalhos)
 
     console.log(`[ImportarCSV/preview] encoding=${encoding} sep="${separador}" colunas=${JSON.stringify(cabecalhos)}`)
     console.log(`[ImportarCSV/preview] primeiras 3 linhas:`, JSON.stringify(registros.slice(0, 3), null, 2))
 
     res.json({
-      total_linhas:       totalLinhas,
-      encoding_detectado: encoding,
+      total_linhas:        totalLinhas,
+      encoding_detectado:  encoding,
       separador_detectado: separador,
-      colunas_detectadas: { email: emailCol, telefone: telefoneCol },
-      preview:            registros.slice(0, 5),
+      colunas_detectadas:  {
+        email:        cols.emailCol,
+        telefone:     cols.telefoneCol,
+        ddd:          cols.dddCol,
+        status:       cols.statusCol,
+        produto_nome: cols.produtoNomeCol,
+        data_venda:   cols.dataVendaCol,
+      },
+      preview:    registros.slice(0, 5),
       cabecalhos,
     })
   } catch (err) {
@@ -185,64 +275,82 @@ importarCsvRouter.post('/preview', upload.single('arquivo'), async (req: Request
   }
 })
 
-// ── POST / (importar) ──────────────────────────────────────────────────────
+// ── POST / (importar apenas telefones) ────────────────────────────────────
+// Atualiza telefone dos clientes já existentes no banco.
+// Aceita ?amostra=100 para processar somente as primeiras N linhas (teste).
 
 importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado. Use o campo "arquivo".' })
 
+  const amostra = req.query.amostra ? Number(req.query.amostra) : undefined
+
   try {
-    const { registros, encoding, separador } = await parsearCsv(req.file.buffer)
+    const { registros, encoding, separador } = await parsearCsv(req.file.buffer, amostra)
 
     if (registros.length === 0) {
       return res.status(400).json({ error: 'CSV vazio ou sem linhas de dados.' })
     }
 
     const cabecalhos = Object.keys(registros[0])
-    const { emailCol, telefoneCol } = detectarColunas(cabecalhos)
+    const { emailCol, telefoneCol, dddCol, statusCol } = detectarColunas(cabecalhos)
 
     console.log(`[ImportarCSV] encoding=${encoding} sep="${separador}" colunas=${JSON.stringify(cabecalhos)}`)
-    console.log(`[ImportarCSV] total de linhas: ${registros.length}`)
+    console.log(`[ImportarCSV] total de linhas: ${registros.length}${amostra ? ` (amostra: ${amostra})` : ''}`)
 
     if (!emailCol) {
       return res.status(400).json({
-        error:              `Coluna de email não encontrada.`,
+        error:               'Coluna de email não encontrada.',
         colunas_encontradas: cabecalhos,
-        dica:               'Esperado: "email", "E-mail do Comprador", "buyer_email"',
+        dica:                'Esperado: "Email", "E-mail do Comprador", "buyer_email"',
       })
     }
-    if (!telefoneCol) {
+    if (!telefoneCol && !dddCol) {
       return res.status(400).json({
-        error:              `Coluna de telefone não encontrada.`,
+        error:               'Coluna de telefone não encontrada.',
         colunas_encontradas: cabecalhos,
-        dica:               'Esperado: "telefone", "Telefone do Comprador", "phone", "whatsapp"',
+        dica:                'Esperado: "Telefone", "DDD" + "Telefone", "phone", "whatsapp"',
       })
     }
 
-    // ── Deduplicação: CSV Hotmart tem 1 linha por transação, não por cliente
-    // Percorre todas as linhas e guarda o último telefone não-vazio por email
+    // Deduplicação: guarda o último telefone não-vazio por email
+    // Filtra apenas linhas com Status aprovado (quando coluna Status existe)
     const emailParaTelefone = new Map<string, string>()
-    let semEmailNaLinha = 0
+    let semEmailNaLinha    = 0
+    let filtradosPorStatus = 0
 
     for (const linha of registros) {
+      // Filtrar por status aprovado quando a coluna existir
+      if (statusCol) {
+        const statusVal = linha[statusCol]?.trim() || ''
+        if (statusVal && !isStatusAprovado(statusVal)) {
+          filtradosPorStatus++
+          continue
+        }
+      }
+
       const email  = linha[emailCol]?.trim().toLowerCase()
-      const telRaw = linha[telefoneCol]?.trim()
+      const telRaw = combinarDddTelefone(linha, dddCol, telefoneCol)
       if (!email) { semEmailNaLinha++; continue }
       if (telRaw) {
         emailParaTelefone.set(email, telRaw)
       } else if (!emailParaTelefone.has(email)) {
-        // Garante que o email aparece no mapa mesmo sem telefone (para contagem)
         emailParaTelefone.set(email, '')
       }
     }
 
-    const emailsUnicos      = emailParaTelefone.size
-    const comTelefone       = [...emailParaTelefone.values()].filter(t => t.length > 0).length
-    const semTelefoneNoCsv  = emailsUnicos - comTelefone
+    const emailsUnicos     = emailParaTelefone.size
+    const comTelefone      = [...emailParaTelefone.values()].filter(t => t.length > 0).length
+    const semTelefoneNoCsv = emailsUnicos - comTelefone
 
-    console.log(`[ImportarCSV] ${registros.length} linhas → ${emailsUnicos} emails únicos (${comTelefone} com telefone)`)
+    console.log(
+      `[ImportarCSV] ${registros.length} linhas → ` +
+      `filtrados_status=${filtradosPorStatus} ` +
+      `emails_unicos=${emailsUnicos} com_telefone=${comTelefone}`
+    )
 
     const resultado = {
-      total_linhas_csv:         registros.length,
+      total_linhas_csv:          registros.length,
+      filtrados_por_status:      filtradosPorStatus,
       emails_unicos_encontrados: emailsUnicos,
       com_telefone:              comTelefone,
       sem_telefone_no_csv:       semTelefoneNoCsv,
@@ -251,7 +359,6 @@ importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: 
       erros:                     0,
     }
 
-    // Processa apenas emails únicos que têm telefone, em lotes de 500
     const entradas = [...emailParaTelefone.entries()].filter(([, tel]) => tel.length > 0)
     const LOTE = 500
 
@@ -289,8 +396,6 @@ importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: 
 
     console.log(
       `[ImportarCSV] Concluído:` +
-      ` linhas=${registros.length}` +
-      ` emails_unicos=${emailsUnicos}` +
       ` atualizados=${resultado.atualizados}` +
       ` nao_encontrados=${resultado.nao_encontrados}` +
       ` erros=${resultado.erros}`
@@ -307,43 +412,73 @@ importarCsvRouter.post('/', upload.single('arquivo'), async (req: Request, res: 
 })
 
 // ── POST /completo ─────────────────────────────────────────────────────────
-// Cria clientes novos E atualiza existentes a partir do CSV da Hotmart.
-// Ao contrário do endpoint principal (que só atualiza quem já existe),
-// este faz upsert por email: cria quem não existe + atualiza telefone de quem existe.
+// Upsert de clientes (cria novos + atualiza telefone) + salva compras.
+// Filtra apenas linhas com Status = COMPLETE / Aprovado.
+// Aceita ?amostra=100 para processar somente as primeiras N linhas (teste).
 
 importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado. Use o campo "arquivo".' })
 
+  const amostra = req.query.amostra ? Number(req.query.amostra) : undefined
+
   try {
-    const { registros, encoding, separador } = await parsearCsv(req.file.buffer)
+    const { registros, encoding, separador } = await parsearCsv(req.file.buffer, amostra)
 
     if (registros.length === 0) {
       return res.status(400).json({ error: 'CSV vazio ou sem linhas de dados.' })
     }
 
     const cabecalhos = Object.keys(registros[0])
-    const { emailCol, telefoneCol, nomeCol } = detectarColunas(cabecalhos)
+    const {
+      emailCol, telefoneCol, dddCol, nomeCol, statusCol,
+      produtoNomeCol, dataVendaCol, precoCol,
+    } = detectarColunas(cabecalhos)
 
-    console.log(`[ImportarCSV/completo] encoding=${encoding} sep="${separador}" colunas=${JSON.stringify(cabecalhos)}`)
+    console.log(
+      `[ImportarCSV/completo] encoding=${encoding} sep="${separador}" ` +
+      `colunas=${JSON.stringify(cabecalhos)}` +
+      `${amostra ? ` amostra=${amostra}` : ''}`
+    )
 
     if (!emailCol) {
       return res.status(400).json({
         error: 'Coluna de email não encontrada.',
         colunas_encontradas: cabecalhos,
-        dica: 'Esperado: "E-mail do Comprador", "email", "buyer_email"',
+        dica: 'Esperado: "Email", "E-mail do Comprador", "buyer_email"',
       })
     }
 
-    // Deduplica por email — guarda nome e telefone mais recentes não-vazios
-    const porEmail = new Map<string, { nome: string; telefone: string }>()
-    let semEmailNaLinha = 0
+    // ── Filtra linhas aprovadas e separa dados por email e por linha ──────────
+    interface DadosCliente {
+      nome:     string
+      telefone: string
+    }
+    interface DadosCompra {
+      email:       string
+      produtoNome: string
+      dataVenda:   Date | null
+      preco:       number | null
+    }
+
+    const porEmail    = new Map<string, DadosCliente>()
+    const comprasLote: DadosCompra[] = []
+    let filtradosPorStatus = 0
 
     for (const linha of registros) {
-      const email  = linha[emailCol]?.trim().toLowerCase()
-      if (!email) { semEmailNaLinha++; continue }
+      // Filtrar por status aprovado quando a coluna existir
+      if (statusCol) {
+        const statusVal = linha[statusCol]?.trim() || ''
+        if (statusVal && !isStatusAprovado(statusVal)) {
+          filtradosPorStatus++
+          continue
+        }
+      }
+
+      const email = linha[emailCol]?.trim().toLowerCase()
+      if (!email) continue
 
       const nome   = nomeCol ? (linha[nomeCol]?.trim() || '') : ''
-      const telRaw = telefoneCol ? (linha[telefoneCol]?.trim() || '') : ''
+      const telRaw = combinarDddTelefone(linha, dddCol, telefoneCol)
 
       if (!porEmail.has(email)) {
         porEmail.set(email, { nome, telefone: telRaw })
@@ -352,21 +487,53 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
         if (!atual.nome     && nome)   atual.nome     = nome
         if (!atual.telefone && telRaw) atual.telefone = telRaw
       }
+
+      // Coleta dados da compra se tiver coluna de produto
+      if (produtoNomeCol) {
+        const produtoNome = linha[produtoNomeCol]?.trim()
+        if (produtoNome) {
+          comprasLote.push({
+            email,
+            produtoNome,
+            dataVenda: dataVendaCol ? parsearData(linha[dataVendaCol] ?? '') : null,
+            preco:     precoCol     ? parsearPreco(linha[precoCol] ?? '')    : null,
+          })
+        }
+      }
     }
 
     const emailsUnicos = porEmail.size
-    console.log(`[ImportarCSV/completo] ${registros.length} linhas → ${emailsUnicos} emails únicos`)
+    console.log(
+      `[ImportarCSV/completo] ${registros.length} linhas → ` +
+      `filtrados_status=${filtradosPorStatus} ` +
+      `emails_unicos=${emailsUnicos} ` +
+      `compras_coletadas=${comprasLote.length}`
+    )
 
-    const resultado = { criados: 0, atualizados: 0, sem_telefone: 0, erros: 0 }
+    // ── Upsert de clientes ─────────────────────────────────────────────────
+    const resultado = {
+      total_linhas_csv:     registros.length,
+      filtrados_por_status: filtradosPorStatus,
+      emails_unicos:        emailsUnicos,
+      criados:              0,
+      atualizados:          0,
+      sem_telefone:         0,
+      compras_inseridas:    0,
+      compras_duplicadas:   0,
+      erros:                0,
+    }
+
+    // Mapa email → cliente_id para uso na etapa de compras
+    const emailParaClienteId = new Map<string, string>()
     const entradas  = [...porEmail.entries()]
-    const LOTE      = 200
+    const LOTE = 200
 
     for (let i = 0; i < entradas.length; i += LOTE) {
       const lote = entradas.slice(i, i + LOTE)
 
       await Promise.all(lote.map(async ([email, { nome, telefone: telRaw }]) => {
         try {
-          const nomeUsado = nome || email.split('@')[0] // fallback: prefixo do email
+          const nomeUsado = nome || email.split('@')[0]
 
           let telefoneFormatado: string | null = null
           let telefoneValido    = false
@@ -396,16 +563,88 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
           `, [nomeUsado, email, telRaw || null, telefoneFormatado, telefoneValido])
 
           const row = r.rows[0]
+          emailParaClienteId.set(email, row.id)
           if (row.xmax === '0') resultado.criados++
           else                  resultado.atualizados++
         } catch (err) {
-          console.error(`[ImportarCSV/completo] Erro ao processar ${email}:`, err)
+          console.error(`[ImportarCSV/completo] Erro ao processar cliente ${email}:`, err)
           resultado.erros++
         }
       }))
 
-      if (i % (LOTE * 5) === 0) {
-        console.log(`[ImportarCSV/completo] Progresso: ${Math.min(i + LOTE, entradas.length)}/${entradas.length}`)
+      if ((i / LOTE) % 5 === 0) {
+        console.log(`[ImportarCSV/completo] Clientes: ${Math.min(i + LOTE, entradas.length)}/${entradas.length}`)
+      }
+    }
+
+    // ── Upsert de produtos e inserção de compras ───────────────────────────
+    if (comprasLote.length > 0) {
+      // Coleta nomes únicos de produtos e faz upsert
+      const nomesUnicos = [...new Set(comprasLote.map(c => c.produtoNome))]
+      const produtoIdPorNome = new Map<string, string>()
+
+      for (const nome of nomesUnicos) {
+        try {
+          // Tenta encontrar o produto existente primeiro
+          const existente = await queryOne<{ id: string }>(
+            'SELECT id FROM produtos WHERE nome = $1', [nome]
+          )
+          if (existente) {
+            produtoIdPorNome.set(nome, existente.id)
+          } else {
+            // Cria produto novo sem tipo (pode ser classificado depois pelo admin)
+            const novo = await pool.query<{ id: string }>(
+              'INSERT INTO produtos (nome) VALUES ($1) RETURNING id', [nome]
+            )
+            if (novo.rows[0]) produtoIdPorNome.set(nome, novo.rows[0].id)
+          }
+        } catch (err) {
+          console.error(`[ImportarCSV/completo] Erro ao upsert produto "${nome}":`, err)
+        }
+      }
+
+      // Insere compras evitando duplicatas (mesmo cliente + produto + data)
+      const LOTE_COMPRAS = 200
+      for (let i = 0; i < comprasLote.length; i += LOTE_COMPRAS) {
+        const lote = comprasLote.slice(i, i + LOTE_COMPRAS)
+
+        await Promise.all(lote.map(async ({ email, produtoNome, dataVenda, preco }) => {
+          const clienteId = emailParaClienteId.get(email)
+          const produtoId = produtoIdPorNome.get(produtoNome)
+          if (!clienteId || !produtoId) return
+
+          try {
+            // Verifica se a compra já existe para evitar duplicatas em reimportações
+            const existente = await queryOne<{ id: string }>(`
+              SELECT id FROM compras
+              WHERE cliente_id = $1
+                AND produto_id = $2
+                AND ($3::date IS NULL OR data_compra::date = $3::date)
+              LIMIT 1
+            `, [clienteId, produtoId, dataVenda ? dataVenda.toISOString() : null])
+
+            if (existente) {
+              resultado.compras_duplicadas++
+              return
+            }
+
+            await pool.query(`
+              INSERT INTO compras (cliente_id, produto_id, valor, status, data_compra)
+              VALUES ($1, $2, $3, $4, $5)
+            `, [
+              clienteId,
+              produtoId,
+              preco,
+              'COMPLETE',
+              dataVenda ? dataVenda.toISOString() : null,
+            ])
+
+            resultado.compras_inseridas++
+          } catch (err) {
+            console.error(`[ImportarCSV/completo] Erro ao inserir compra para ${email}:`, err)
+            resultado.erros++
+          }
+        }))
       }
     }
 
@@ -414,10 +653,12 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
       ` criados=${resultado.criados}` +
       ` atualizados=${resultado.atualizados}` +
       ` sem_telefone=${resultado.sem_telefone}` +
+      ` compras_inseridas=${resultado.compras_inseridas}` +
+      ` compras_duplicadas=${resultado.compras_duplicadas}` +
       ` erros=${resultado.erros}`
     )
 
-    res.json({ success: true, total_linhas_csv: registros.length, emails_unicos: emailsUnicos, ...resultado })
+    res.json({ success: true, ...resultado })
   } catch (err) {
     console.error('[ImportarCSV/completo] Erro:', err)
     res.status(500).json({ error: `Erro ao processar arquivo: ${String(err)}` })
@@ -431,17 +672,25 @@ importarCsvRouter.post('/debug-colunas', upload.single('arquivo'), async (req: R
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' })
 
   try {
-    const { registros, encoding, separador } = await parsearCsv(req.file.buffer)
+    const { registros, encoding, separador } = await parsearCsv(req.file.buffer, 10)
     const cabecalhos = Object.keys(registros[0] ?? {})
-    const { emailCol, telefoneCol } = detectarColunas(cabecalhos)
+    const cols = detectarColunas(cabecalhos)
 
     res.json({
-      encoding_detectado:   encoding,
-      separador_detectado:  separador,
-      colunas_encontradas:  cabecalhos,
-      primeiras_3_linhas:   registros.slice(0, 3),
-      email_coluna:         emailCol,
-      telefone_coluna:      telefoneCol,
+      encoding_detectado:  encoding,
+      separador_detectado: separador,
+      colunas_encontradas: cabecalhos,
+      primeiras_3_linhas:  registros.slice(0, 3),
+      colunas_mapeadas: {
+        email:        cols.emailCol,
+        telefone:     cols.telefoneCol,
+        ddd:          cols.dddCol,
+        nome:         cols.nomeCol,
+        status:       cols.statusCol,
+        produto_nome: cols.produtoNomeCol,
+        data_venda:   cols.dataVendaCol,
+        preco:        cols.precoCol,
+      },
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })

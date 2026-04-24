@@ -47,7 +47,7 @@ function normalizarNomeProduto(nome: string): string {
 export async function inscreverClienteNaTrilhaAutomaticamente(
   clienteId: string,
   produtoId: string
-): Promise<void> {
+): Promise<string | null> {
   // 1. Busca direta
   let trilha = await queryOne<{ id: string }>(`
     SELECT id FROM trilhas_cadencia
@@ -86,7 +86,7 @@ export async function inscreverClienteNaTrilhaAutomaticamente(
 
   if (!trilha) {
     console.log(`[Cadencia] Nenhuma trilha para produto_id=${produtoId} — cliente não inscrito`)
-    return
+    return null
   }
 
   // Busca etapa 1 para calcular data_proxima_etapa
@@ -104,6 +104,7 @@ export async function inscreverClienteNaTrilhaAutomaticamente(
   `, [clienteId, trilha.id, diasEtapa1])
 
   console.log(`[Cadencia] Cliente ${clienteId} inscrito na trilha ${trilha.id}`)
+  return trilha.id
 }
 
 // ── Lista do dia ───────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express'
-import { pool, queryOne } from '../db'
+import { pool } from '../db'
 import { formatarTelefone } from '../services/hotmart'
 import { upsertCliente, upsertProduto, upsertCompra, buscarProdutoPorHotmartId } from '../db/queries'
 import { reclassificarComprasCliente, lerValorMaximoOB } from '../services/classificarOrderBump'
@@ -90,15 +90,9 @@ async function processarWebhookPayload(payload: HotmartPayload): Promise<Webhook
   await reclassificarComprasCliente(clienteId, valorMaximoOB)
 
   // ── Trilha de cadência ─────────────────────────────────────────────────
-  await inscreverClienteNaTrilhaAutomaticamente(clienteId, produtoId)
-
-  // Detecta se foi inscrito verificando existência na tabela
-  const inscricaoTrilha = await queryOne<{ trilha_id: string }>(
-    `SELECT trilha_id FROM clientes_trilha WHERE cliente_id = $1 AND trilha_id IN (
-       SELECT id FROM trilhas_cadencia WHERE produto_entrada_id = $2
-     ) LIMIT 1`,
-    [clienteId, produtoId]
-  )
+  console.log(`[Webhook] Chamando inscrição: clienteId=${clienteId} produtoId=${produtoId}`)
+  const trilhaInscrita = await inscreverClienteNaTrilhaAutomaticamente(clienteId, produtoId)
+  console.log(`[Webhook] Resultado inscrição: trilha_id=${trilhaInscrita ?? 'não inscrito'}`)
 
   return {
     cliente: {
@@ -121,8 +115,8 @@ async function processarWebhookPayload(payload: HotmartPayload): Promise<Webhook
       valor:       purchase.price?.value ?? null,
     },
     trilha: {
-      inscrito:  inscricaoTrilha !== null,
-      trilha_id: inscricaoTrilha?.trilha_id,
+      inscrito:  trilhaInscrita !== null,
+      trilha_id: trilhaInscrita ?? undefined,
     },
   }
 }

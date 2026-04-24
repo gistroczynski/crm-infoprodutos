@@ -110,9 +110,20 @@ function detectarColunas(cabecalhos: string[]): {
 
 // ── Helpers para dados da Hotmart ──────────────────────────────────────────
 
+const STATUS_VALIDOS = new Set([
+  'complete', 'completo',
+  'aprovado', 'approved',
+  'pago', 'paid',
+  'concluido', 'concluido',
+])
+
+function removerAcentos(str: string): string {
+  return str.normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
 function isStatusAprovado(statusVal: string): boolean {
-  const s = statusVal.trim().toUpperCase()
-  return s === 'COMPLETE' || s === 'APROVADO' || s === 'APPROVED'
+  const s = removerAcentos(statusVal.trim()).toLowerCase()
+  return STATUS_VALIDOS.has(s)
 }
 
 function combinarDddTelefone(

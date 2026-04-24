@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useToast } from '../../hooks/useToast'
 import { useAuth } from '../../contexts/AuthContext'
+import { useDarkMode } from '../../hooks/useDarkMode'
 import api from '../../services/api'
 import logoOgc from '../../assets/logo-ogc.svg'
 import {
@@ -12,6 +13,10 @@ import {
   SettingsIcon,
   ZapIcon,
   RotateCcwIcon,
+  SunIcon,
+  MoonIcon,
+  LogOutIcon,
+  RefreshCwIcon,
 } from './icons'
 
 // ── Hooks internos ─────────────────────────────────────────────────────────
@@ -62,7 +67,7 @@ function useVendasHojeCount() {
 }
 
 function useSyncStatus() {
-  const [ultimaSync, setUltimaSync] = useState<string | null>(null)
+  const [ultimaSync,  setUltimaSync]  = useState<string | null>(null)
   const [emAndamento, setEmAndamento] = useState(false)
 
   const fetch = useCallback(() => {
@@ -87,22 +92,43 @@ function tempoPassado(iso: string | null): string {
   if (!iso) return 'nunca'
   const diffMs = Date.now() - new Date(iso).getTime()
   const min    = Math.floor(diffMs / 60_000)
-  if (min < 1)   return 'agora'
-  if (min < 60)  return `${min} min atrás`
+  if (min < 1)  return 'agora'
+  if (min < 60) return `${min} min atrás`
   const h = Math.floor(min / 60)
-  if (h < 24)    return `${h}h atrás`
+  if (h < 24)   return `${h}h atrás`
   return `${Math.floor(h / 24)}d atrás`
 }
 
-// ── Componente ─────────────────────────────────────────────────────────────
+// ── Botão de ação no rodapé ─────────────────────────────────────────────────
+
+function FooterBtn({
+  onClick, disabled = false, title, children,
+}: {
+  onClick: () => void; disabled?: boolean; title: string; children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500
+                 hover:text-white hover:bg-white/10 disabled:opacity-40 transition-colors flex-shrink-0"
+    >
+      {children}
+    </button>
+  )
+}
+
+// ── Componente principal ────────────────────────────────────────────────────
 
 export default function Sidebar() {
-  const toast            = useToast()
+  const toast              = useToast()
   const { usuario, logout } = useAuth()
-  const navigate         = useNavigate()
-  const fluxoAtivo       = useFluxoAtivoCount()
-  const reativacao       = useReativacaoCount()
-  const vendasHoje       = useVendasHojeCount()
+  const navigate            = useNavigate()
+  const { dark, toggle }    = useDarkMode()
+  const fluxoAtivo          = useFluxoAtivoCount()
+  const reativacao          = useReativacaoCount()
+  const vendasHoje          = useVendasHojeCount()
   const { ultimaSync, emAndamento, refetch } = useSyncStatus()
   const [syncing, setSyncing] = useState(false)
 
@@ -125,44 +151,53 @@ export default function Sidebar() {
   }
 
   const navItems = [
-    { to: '/fluxo-ativo',   label: 'Fluxo Ativo',   Icon: ZapIcon,             badge: fluxoAtivo  > 0 ? fluxoAtivo  : 0 },
-    { to: '/reativacao',    label: 'Reativação',    Icon: RotateCcwIcon,       badge: reativacao  > 0 ? Math.min(reativacao, 9999) : 0 },
+    { to: '/fluxo-ativo',   label: 'Fluxo Ativo',   Icon: ZapIcon,             badge: fluxoAtivo > 0 ? fluxoAtivo : 0 },
+    { to: '/reativacao',    label: 'Reativação',    Icon: RotateCcwIcon,       badge: reativacao > 0 ? Math.min(reativacao, 9999) : 0 },
     { to: '/clientes',      label: 'Clientes',      Icon: UsersIcon,           badge: 0 },
-    { to: '/vendas',        label: 'Vendas',        Icon: ShoppingCartIcon,    badge: vendasHoje  > 0 ? vendasHoje  : 0 },
+    { to: '/vendas',        label: 'Vendas',        Icon: ShoppingCartIcon,    badge: vendasHoje > 0 ? vendasHoje : 0 },
     { to: '/dashboard',     label: 'Dashboard',     Icon: LayoutDashboardIcon, badge: 0 },
     ...(usuario?.perfil === 'admin'
       ? [{ to: '/relatorios', label: 'Relatórios', Icon: BarChart3Icon, badge: 0 }]
       : []),
-    { to: '/configuracoes', label: 'Configurações', Icon: SettingsIcon,        badge: 0 },
+    { to: '/configuracoes', label: 'Configurações', Icon: SettingsIcon, badge: 0 },
   ]
 
   return (
-    <aside className="w-60 bg-[#111111] flex flex-col">
-      {/* Logo */}
-      <div className="h-16 flex items-center gap-3 px-5 border-b border-white/10">
-        <img src={logoOgc} alt="OGC" className="w-8 h-8 flex-shrink-0" />
-        <span className="text-white font-bold text-base tracking-wide">CRM OGC</span>
+    <aside
+      className="flex flex-col bg-[#111111] flex-shrink-0"
+      style={{ width: 240 }}
+    >
+      {/* ── Logo ── */}
+      <div className="flex items-center gap-3 px-4 border-b border-white/10 flex-shrink-0" style={{ height: 56 }}>
+        <img src={logoOgc} alt="OGC" style={{ width: 32, height: 32, flexShrink: 0 }} />
+        <span className="text-white font-bold text-sm tracking-wide leading-none">CRM OGC</span>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
+      {/* ── Navegação ── */}
+      <nav className="flex-1 overflow-y-auto px-2 py-3" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {navItems.map(({ to, label, Icon, badge }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) =>
               [
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                'flex items-center gap-3 rounded-lg font-medium transition-colors',
                 isActive
                   ? 'bg-[#D2191F] text-white'
-                  : 'text-gray-400 hover:bg-white/8 hover:text-white',
+                  : 'text-gray-400 hover:bg-white/10 hover:text-white',
               ].join(' ')
             }
+            style={{ height: 44, paddingLeft: 16, paddingRight: 12, fontSize: 14 }}
           >
-            <Icon className="h-4.5 w-4.5 flex-shrink-0" />
-            <span className="flex-1">{label}</span>
+            <Icon style={{ width: 20, height: 20, flexShrink: 0 }} />
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {label}
+            </span>
             {badge > 0 && (
-              <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-white/20 text-white">
+              <span
+                className="inline-flex items-center justify-center rounded-full font-bold bg-white/20 text-white flex-shrink-0"
+                style={{ minWidth: 18, height: 18, padding: '0 4px', fontSize: 10 }}
+              >
                 {badge > 99 ? '99+' : badge}
               </span>
             )}
@@ -170,56 +205,75 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Sync + usuário */}
-      <div className="px-4 py-3 border-t border-white/10 space-y-3">
-        {/* Última sync */}
+      {/* ── Rodapé ── */}
+      <div className="border-t border-white/10 flex-shrink-0 px-3 py-3 space-y-2">
+
+        {/* Linha: última sync */}
         <div className="flex items-center justify-between">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold text-gray-600 uppercase tracking-wide">Última sync</p>
-            <p className="text-xs text-gray-500 truncate">
-              {emAndamento ? (
-                <span className="text-[#D2191F] font-medium">Em andamento...</span>
-              ) : (
-                tempoPassado(ultimaSync)
-              )}
+          <div className="min-w-0 flex-1">
+            <p className="text-gray-600 font-semibold uppercase tracking-wide" style={{ fontSize: 10 }}>
+              Última sync
+            </p>
+            <p className="text-gray-500 truncate" style={{ fontSize: 11 }}>
+              {emAndamento
+                ? <span className="text-[#D2191F] font-medium">Em andamento...</span>
+                : tempoPassado(ultimaSync)
+              }
             </p>
           </div>
-          <button
+          <FooterBtn
             onClick={triggerSync}
             disabled={syncing || emAndamento}
             title="Sincronizar com Hotmart"
-            className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 disabled:opacity-40 transition-colors flex-shrink-0"
           >
-            <svg
-              className={`w-3.5 h-3.5 ${(syncing || emAndamento) ? 'animate-spin' : ''}`}
-              fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
+            <RefreshCwIcon
+              style={{ width: 14, height: 14 }}
+              className={syncing || emAndamento ? 'animate-spin' : ''}
+            />
+          </FooterBtn>
         </div>
 
-        {/* Usuário + logout */}
+        {/* Linha: usuário + dark mode + logout */}
         {usuario && (
-          <div className="flex items-center gap-2 pt-1 border-t border-white/10">
-            <div className="w-7 h-7 rounded-full bg-[#D2191F] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+          <div className="flex items-center gap-2 pt-2 border-t border-white/10">
+            {/* Avatar */}
+            <div
+              className="rounded-full bg-[#D2191F] flex items-center justify-center text-white font-bold flex-shrink-0"
+              style={{ width: 28, height: 28, fontSize: 12 }}
+            >
               {usuario.nome.charAt(0).toUpperCase()}
             </div>
+
+            {/* Nome + badge perfil */}
             <div className="flex-1 min-w-0">
-              <p className="text-xs text-white font-medium truncate">{usuario.nome}</p>
-              <span className={`text-[10px] font-semibold uppercase tracking-wide ${usuario.perfil === 'admin' ? 'text-[#D2191F]' : 'text-gray-500'}`}>
+              <p className="text-white font-medium truncate" style={{ fontSize: 12 }}>
+                {usuario.nome}
+              </p>
+              <span
+                className={[
+                  'inline-block rounded font-semibold uppercase tracking-wide px-1',
+                  usuario.perfil === 'admin'
+                    ? 'bg-[#D2191F]/20 text-[#D2191F]'
+                    : 'bg-white/10 text-gray-400',
+                ].join(' ')}
+                style={{ fontSize: 9, lineHeight: '14px' }}
+              >
                 {usuario.perfil}
               </span>
             </div>
-            <button
-              onClick={handleLogout}
-              title="Sair"
-              className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
+
+            {/* Toggle dark mode */}
+            <FooterBtn onClick={toggle} title={dark ? 'Modo claro' : 'Modo escuro'}>
+              {dark
+                ? <SunIcon  style={{ width: 14, height: 14 }} />
+                : <MoonIcon style={{ width: 14, height: 14 }} />
+              }
+            </FooterBtn>
+
+            {/* Logout */}
+            <FooterBtn onClick={handleLogout} title="Sair">
+              <LogOutIcon style={{ width: 14, height: 14 }} />
+            </FooterBtn>
           </div>
         )}
       </div>

@@ -545,4 +545,34 @@ export const vendasApi = {
     api.get<ResumoDiarioItem[]>('/api/vendas/resumo-diario', { params: { inicio, fim } }).then(r => r.data),
 }
 
+// ── Mensagens Template ────────────────────────────────────────────────────
+
+export interface MensagemTemplate {
+  id:         string
+  nome:       string
+  texto:      string
+  contexto:   string
+  is_sistema: boolean
+  ativa:      boolean
+  produto_id: string | null
+  updated_at: string
+}
+
+export const mensagensApi = {
+  list: () =>
+    api.get<MensagemTemplate[]>('/api/configuracoes/mensagens').then(r => r.data),
+
+  create: (data: { nome: string; texto: string; contexto: string; ativa: boolean }) =>
+    api.post<MensagemTemplate>('/api/configuracoes/mensagens', data).then(r => r.data),
+
+  update: (id: string, data: { nome: string; texto: string; contexto: string; ativa: boolean }) =>
+    api.put<MensagemTemplate>(`/api/configuracoes/mensagens/${id}`, data).then(r => r.data),
+
+  duplicar: (id: string) =>
+    api.post<MensagemTemplate>(`/api/configuracoes/mensagens/${id}/duplicar`).then(r => r.data),
+
+  delete: (id: string) =>
+    api.delete(`/api/configuracoes/mensagens/${id}`).then(r => r.data),
+}
+
 export default api

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { queryOne } from '../db'
+import { authMiddleware } from '../middleware/auth'
 
 export const authRouter = Router()
 
@@ -43,8 +44,8 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 })
 
 // ── GET /api/auth/me ───────────────────────────────────────────────────────
-authRouter.get('/me', async (req: Request, res: Response) => {
-  // req.usuario já foi populado pelo authMiddleware
-  if (!req.usuario) return res.status(401).json({ error: 'Não autenticado.' })
-  res.json({ usuario: req.usuario })
+// authMiddleware aplicado aqui porque /api/auth é registrado antes do
+// middleware global em index.ts (necessário para /login ser público).
+authRouter.get('/me', authMiddleware, (_req: Request, res: Response) => {
+  res.json({ usuario: _req.usuario })
 })

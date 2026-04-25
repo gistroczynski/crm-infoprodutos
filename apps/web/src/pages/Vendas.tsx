@@ -46,10 +46,12 @@ function calcRange(periodo: Periodo): { inicio: string; fim: string } {
     ini.setDate(hoje.getDate() - 6)
     return { inicio: fmt(ini), fim: fmt(hoje) }
   }
-  // mes = últimos 30 dias completos
-  const ini = new Date(hoje)
-  ini.setDate(hoje.getDate() - 29)
-  return { inicio: fmt(ini), fim: fmt(hoje) }
+  if (periodo === 'mes') {
+    const y = hoje.getFullYear()
+    const m = String(hoje.getMonth() + 1).padStart(2, '0')
+    return { inicio: `${y}-${m}-01`, fim: fmt(hoje) }
+  }
+  return { inicio: fmt(hoje), fim: fmt(hoje) }
 }
 
 // ── Badge tipo produto ───────────────────────────────────────────────────────

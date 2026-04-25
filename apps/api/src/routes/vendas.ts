@@ -88,20 +88,20 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
 
       queryOne<{ total: string; receita: string; ticket: string }>(`
         SELECT
-          COUNT(*)::text                                  AS total,
-          COALESCE(SUM(co.valor::numeric), 0)::text      AS receita,
+          COUNT(*)::text                                                                   AS total,
+          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita,
           CASE WHEN COUNT(*) > 0
-               THEN (SUM(co.valor::numeric) / COUNT(*))::text
-               ELSE '0' END                              AS ticket
+               THEN (SUM(COALESCE(co.valor_liquido, co.valor)::numeric) / COUNT(*))::text
+               ELSE '0' END                                                                AS ticket
         ${FROM_JOIN}
         ${baseWhere}
       `, baseParams),
 
       query<{ data: string; quantidade: string; receita: string }>(`
         SELECT
-          (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date::text AS data,
-          COUNT(*)::text                        AS quantidade,
-          COALESCE(SUM(co.valor::numeric), 0)::text AS receita
+          (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date::text                   AS data,
+          COUNT(*)::text                                                                    AS quantidade,
+          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text            AS receita
         ${FROM_JOIN}
         ${baseWhere}
         GROUP BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date
@@ -175,11 +175,11 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
 
       queryOne<{ total: string; receita: string; ticket: string }>(`
         SELECT
-          COUNT(*)::text                             AS total,
-          COALESCE(SUM(co.valor::numeric), 0)::text AS receita,
+          COUNT(*)::text                                                                   AS total,
+          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita,
           CASE WHEN COUNT(*) > 0
-               THEN (SUM(co.valor::numeric) / COUNT(*))::text
-               ELSE '0' END                        AS ticket
+               THEN (SUM(COALESCE(co.valor_liquido, co.valor)::numeric) / COUNT(*))::text
+               ELSE '0' END                                                                AS ticket
         ${FROM_JOIN}
         WHERE co.status IN ('COMPLETE', 'APPROVED')
           AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
@@ -187,8 +187,8 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
 
       queryOne<{ total: string; receita: string }>(`
         SELECT
-          COUNT(*)::text                             AS total,
-          COALESCE(SUM(co.valor::numeric), 0)::text AS receita
+          COUNT(*)::text                                                                   AS total,
+          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
         ${FROM_JOIN}
         WHERE co.status IN ('COMPLETE', 'APPROVED')
           AND ${DATA_BRT('co.data_compra')} = ${ONTEM_BRT}
@@ -197,8 +197,8 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
       query<{ nome: string; quantidade: string; receita: string }>(`
         SELECT
           p.nome,
-          COUNT(*)::text                             AS quantidade,
-          COALESCE(SUM(co.valor::numeric), 0)::text AS receita
+          COUNT(*)::text                                                                   AS quantidade,
+          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
         ${FROM_JOIN}
         WHERE co.status IN ('COMPLETE', 'APPROVED')
           AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
@@ -255,8 +255,8 @@ vendasRouter.get('/resumo-diario', async (req: Request, res: Response) => {
       SELECT
         (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date::text AS data,
         p.nome                                  AS produto_nome,
-        COUNT(*)::text                          AS quantidade,
-        COALESCE(SUM(co.valor::numeric), 0)::text AS receita
+        COUNT(*)::text                                                                  AS quantidade,
+        COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
       ${FROM_JOIN}
       WHERE co.status IN ('COMPLETE', 'APPROVED')
         AND co.data_compra >= $1::date

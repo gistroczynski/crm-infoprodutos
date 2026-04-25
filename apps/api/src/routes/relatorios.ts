@@ -292,3 +292,47 @@ relatoriosRouter.get('/produtos', async (req: Request, res: Response) => {
     })
   } catch (err) { res.status(500).json({ error: String(err) }) }
 })
+
+// ── GET /api/relatorios/cadencias ─────────────────────────────────────────
+relatoriosRouter.get('/cadencias', async (req: Request, res: Response) => {
+  try {
+    const { inicio, fim } = parseDateRange(req)
+
+    const rows = await query<{
+      trilha_nome: string
+      total_inscritos: number
+      em_andamento: number
+      convertidos: number
+      desistiram: number
+      concluidos: number
+      taxa_conversao: number
+      tempo_medio_dias: number
+    }>(`
+      SELECT
+        t.nome                                                                AS trilha_nome,
+        COUNT(ct.id)::int                                                     AS total_inscritos,
+        COUNT(CASE WHEN ct.status = 'ativo'      THEN 1 END)::int            AS em_andamento,
+        COUNT(CASE WHEN ct.status = 'convertido' THEN 1 END)::int            AS convertidos,
+        COUNT(CASE WHEN ct.status = 'desistiu'   THEN 1 END)::int            AS desistiram,
+        COUNT(CASE WHEN ct.status = 'concluido'  THEN 1 END)::int            AS concluidos,
+        COALESCE(ROUND(
+          COUNT(CASE WHEN ct.status = 'convertido' THEN 1 END)::numeric
+          / NULLIF(COUNT(ct.id), 0) * 100
+        ), 0)::int                                                            AS taxa_conversao,
+        COALESCE(AVG(
+          CASE WHEN ct.status = 'convertido'
+               THEN (CURRENT_DATE - ct.data_entrada::date)
+          END
+        )::int, 0)                                                            AS tempo_medio_dias
+      FROM trilhas_cadencia t
+      LEFT JOIN clientes_trilha ct ON ct.trilha_id = t.id
+        AND ct.data_entrada::date >= $1::date
+        AND ct.data_entrada::date <= $2::date
+      WHERE t.ativa = true
+      GROUP BY t.id, t.nome
+      ORDER BY taxa_conversao DESC, total_inscritos DESC
+    `, [inicio, fim])
+
+    res.json({ por_trilha: rows })
+  } catch (err) { res.status(500).json({ error: String(err) }) }
+})

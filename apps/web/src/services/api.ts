@@ -171,6 +171,19 @@ export interface RelatorioProdutos {
   }[]
 }
 
+export interface RelatorioCadencias {
+  por_trilha: {
+    trilha_nome: string
+    total_inscritos: number
+    em_andamento: number
+    convertidos: number
+    desistiram: number
+    concluidos: number
+    taxa_conversao: number
+    tempo_medio_dias: number
+  }[]
+}
+
 export const relatoriosApi = {
   ascensao: (inicio: string, fim: string) =>
     api.get<RelatorioAscensao>('/api/relatorios/ascensao', { params: { inicio, fim } }).then(r => r.data),
@@ -180,6 +193,8 @@ export const relatoriosApi = {
     api.get<RelatorioPerformanceLista>('/api/relatorios/performance-lista', { params: { inicio, fim } }).then(r => r.data),
   produtos: (inicio: string, fim: string) =>
     api.get<RelatorioProdutos>('/api/relatorios/produtos', { params: { inicio, fim } }).then(r => r.data),
+  cadencias: (inicio: string, fim: string) =>
+    api.get<RelatorioCadencias>('/api/relatorios/cadencias', { params: { inicio, fim } }).then(r => r.data),
 }
 
 // ── Configurações ─────────────────────────────────────────────────────────

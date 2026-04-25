@@ -1,14 +1,18 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, Legend,
+  LineChart, Line, Legend, AreaChart, Area,
 } from 'recharts'
 import {
   relatoriosApi,
+  dashboardApi,
   type RelatorioAscensao,
   type RelatorioFunil,
   type RelatorioPerformanceLista,
   type RelatorioProdutos,
+  type RelatorioCadencias,
+  type DashboardResumo,
+  type EvolucaoDia,
 } from '../services/api'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -180,16 +184,122 @@ const prioColors: Record<string, string> = {
   baixa: 'bg-gray-100 text-gray-600',
 }
 
-// ── Aba Ascensão ───────────────────────────────────────────────────────────
+// ── Aba Visão Geral ────────────────────────────────────────────────────────
 
-function AbaAscensao({ range }: { range: DateRange }) {
-  const [data, setData]     = useState<RelatorioAscensao | null>(null)
+function AbaVisaoGeral({ range }: { range: DateRange }) {
+  const [resumo,  setResumo]  = useState<DashboardResumo | null>(null)
+  const [evolucao, setEvolucao] = useState<EvolucaoDia[]>([])
+  const [lista,   setLista]   = useState<RelatorioPerformanceLista | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    relatoriosApi.ascensao(range.inicio, range.fim)
-      .then(setData).finally(() => setLoading(false))
+    Promise.all([
+      dashboardApi.resumo(range.inicio, range.fim),
+      dashboardApi.evolucao(range.inicio, range.fim),
+      relatoriosApi.performanceLista(range.inicio, range.fim),
+    ]).then(([r, e, l]) => { setResumo(r); setEvolucao(e); setLista(l) })
+      .finally(() => setLoading(false))
+  }, [range.inicio, range.fim])
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {loading ? Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+            <Sk cls="h-3 w-24" /><Sk cls="h-8 w-20" /><Sk cls="h-3 w-16" />
+          </div>
+        )) : <>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Faturamento</span>
+              <span className="text-emerald-600 opacity-70">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </span>
+            </div>
+            <p className="text-2xl font-bold text-emerald-600">{brl(resumo?.faturamento_brl ?? resumo?.faturamento_total ?? 0)}</p>
+            {(resumo?.faturamento_usd ?? 0) > 0 && (
+              <p className="text-sm font-semibold text-gray-600">
+                {(resumo?.faturamento_usd ?? 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+              </p>
+            )}
+            <p className="text-xs text-gray-400">{resumo?.total_compras ?? 0} compras</p>
+          </div>
+          <MetricCard label="Clientes no Período" value={(resumo?.total_clientes ?? 0).toLocaleString('pt-BR')}
+            color="text-primary-600"
+            sub="com ao menos 1 compra"
+            icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
+          />
+          <MetricCard label="Taxa de Ascensão" value={`${resumo?.taxa_ascensao ?? 0}%`}
+            color="text-violet-600"
+            sub="compraram o produto upsell"
+            icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>}
+          />
+          <MetricCard label="Conversão Lista" value={`${lista?.taxa_conversao ?? 0}%`}
+            color="text-amber-600"
+            sub={`${lista?.total_convertidos ?? 0} de ${lista?.total_contatos_realizados ?? 0} contatos`}
+            icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          />
+        </>}
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Faturamento Diário</h2>
+        {loading ? <Sk cls="h-52 w-full" /> : (
+          evolucao.length > 0 ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={evolucao} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradReceita" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#10b981" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis
+                  dataKey="data"
+                  tick={{ fontSize: 10, fill: '#9ca3af' }}
+                  tickFormatter={d => new Date(d + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                  interval={Math.max(0, Math.floor(evolucao.length / 6) - 1)}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: '#9ca3af' }}
+                  tickFormatter={v => `R$${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+                  width={70}
+                />
+                <Tooltip
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                  labelFormatter={d => new Date(d + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  formatter={(v) => [brl(Number(v)), 'Receita']}
+                />
+                <Area type="monotone" dataKey="receita" stroke="#10b981" strokeWidth={2} fill="url(#gradReceita)" dot={false} activeDot={{ r: 4 }} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-52 flex items-center justify-center text-sm text-gray-400">
+              Nenhum dado no período selecionado.
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Aba Ascensão ───────────────────────────────────────────────────────────
+
+function AbaAscensao({ range }: { range: DateRange }) {
+  const [data,      setData]      = useState<RelatorioAscensao | null>(null)
+  const [cadencias, setCadencias] = useState<RelatorioCadencias | null>(null)
+  const [loading,   setLoading]   = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([
+      relatoriosApi.ascensao(range.inicio, range.fim),
+      relatoriosApi.cadencias(range.inicio, range.fim),
+    ]).then(([a, c]) => { setData(a); setCadencias(c) })
+      .finally(() => setLoading(false))
   }, [range.inicio, range.fim])
 
   function exportar() {
@@ -258,6 +368,56 @@ function AbaAscensao({ range }: { range: DateRange }) {
             </div>
           )
         )}
+      </div>
+
+      {/* Cadências */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Performance por Trilha de Cadência</h2>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 border-b border-gray-100">
+            <tr>
+              <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase">Trilha</th>
+              <th className="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase">Inscritos</th>
+              <th className="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Em andamento</th>
+              <th className="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase">Convertidos</th>
+              <th className="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Desistiram</th>
+              <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase">Taxa Conv.</th>
+              <th className="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Tempo Médio</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {loading
+              ? Array.from({ length: 3 }).map((_, i) => (
+                  <tr key={i}>{Array.from({ length: 7 }).map((__, j) => (
+                    <td key={j} className="px-5 py-3.5"><Sk cls="h-4 w-full" /></td>
+                  ))}</tr>
+                ))
+              : (cadencias?.por_trilha ?? []).length === 0
+                ? <tr><td colSpan={7} className="text-center py-10 text-sm text-gray-400">Nenhuma trilha ativa no período.</td></tr>
+                : (cadencias?.por_trilha ?? []).map(t => (
+                    <tr key={t.trilha_nome} className="hover:bg-gray-50">
+                      <td className="px-5 py-3.5 font-medium text-gray-900 max-w-[200px] truncate" title={t.trilha_nome}>{t.trilha_nome}</td>
+                      <td className="px-5 py-3.5 text-right text-gray-700">{t.total_inscritos}</td>
+                      <td className="px-5 py-3.5 text-right text-blue-600 hidden sm:table-cell">{t.em_andamento}</td>
+                      <td className="px-5 py-3.5 text-right text-emerald-600 font-semibold">{t.convertidos}</td>
+                      <td className="px-5 py-3.5 text-right text-red-400 hidden md:table-cell">{t.desistiram}</td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${t.taxa_conversao}%` }} />
+                          </div>
+                          <span className="text-sm font-semibold text-gray-700">{t.taxa_conversao}%</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 text-right text-gray-500 hidden lg:table-cell">
+                        {t.tempo_medio_dias > 0 ? `${t.tempo_medio_dias} dias` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )
@@ -576,17 +736,18 @@ function AbaProdutos({ range }: { range: DateRange }) {
 
 // ── Relatorios ─────────────────────────────────────────────────────────────
 
-type Aba = 'ascensao' | 'funil' | 'lista' | 'produtos'
+type Aba = 'geral' | 'ascensao' | 'funil' | 'lista' | 'produtos'
 
 const ABAS: { id: Aba; label: string }[] = [
-  { id: 'ascensao', label: 'Ascensão'      },
-  { id: 'funil',    label: 'Funil'         },
-  { id: 'lista',    label: 'Lista Diária'  },
-  { id: 'produtos', label: 'Produtos'      },
+  { id: 'geral',    label: 'Visão Geral'         },
+  { id: 'ascensao', label: 'Ascensão'             },
+  { id: 'funil',    label: 'Funil'                },
+  { id: 'lista',    label: 'Performance Comercial'},
+  { id: 'produtos', label: 'Produtos'             },
 ]
 
 export default function Relatorios() {
-  const [aba,   setAba]   = useState<Aba>('ascensao')
+  const [aba,   setAba]   = useState<Aba>('geral')
   const [range, setRange] = useState<DateRange>(mesAtual())
 
   return (
@@ -598,13 +759,13 @@ export default function Relatorios() {
       </div>
 
       {/* ── Sub-abas ── */}
-      <div className="flex border-b border-gray-200 -mb-px">
+      <div className="flex border-b border-gray-200 -mb-px overflow-x-auto">
         {ABAS.map(a => (
           <button
             key={a.id}
             onClick={() => setAba(a.id)}
             className={[
-              'px-5 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px',
+              'px-5 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px whitespace-nowrap',
               aba === a.id
                 ? 'border-primary-600 text-primary-700'
                 : 'border-transparent text-gray-500 hover:text-gray-700',
@@ -617,10 +778,11 @@ export default function Relatorios() {
 
       {/* ── Conteúdo da aba ── */}
       <div className="pt-1">
-        {aba === 'ascensao' && <AbaAscensao range={range} />}
-        {aba === 'funil'    && <AbaFunil    range={range} />}
-        {aba === 'lista'    && <AbaLista    range={range} />}
-        {aba === 'produtos' && <AbaProdutos range={range} />}
+        {aba === 'geral'    && <AbaVisaoGeral range={range} />}
+        {aba === 'ascensao' && <AbaAscensao   range={range} />}
+        {aba === 'funil'    && <AbaFunil       range={range} />}
+        {aba === 'lista'    && <AbaLista       range={range} />}
+        {aba === 'produtos' && <AbaProdutos    range={range} />}
       </div>
     </div>
   )

@@ -135,8 +135,9 @@ manutencaoRouter.post('/limpar-compras-sem-id', async (_req: Request, res: Respo
 })
 
 // ── POST /api/manutencao/corrigir-valores-centavos ────────────────────────
-// Divide por 100 compras cujo valor > 10.000 — sinal de que foram
-// importadas em centavos em vez de reais.
+// Divide por 100 compras importadas em centavos:
+// - sem casas decimais (valor = FLOOR(valor))
+// - acima do produto mais caro (~R$197), threshold em R$200
 manutencaoRouter.post('/corrigir-valores-centavos', async (_req: Request, res: Response) => {
   const client = await pool.connect()
   try {
@@ -144,16 +145,17 @@ manutencaoRouter.post('/corrigir-valores-centavos', async (_req: Request, res: R
       SELECT id, valor::text
       FROM compras
       WHERE hotmart_transaction_id IS NULL
-        AND valor::numeric > 10000
-      ORDER BY valor::numeric DESC
+        AND valor > 200
+        AND valor = FLOOR(valor)
+      ORDER BY valor DESC
       LIMIT 100
     `)
 
     if (antes.length === 0) {
       return res.json({
-        success:   true,
+        success:    true,
         corrigidas: 0,
-        mensagem:  'Nenhuma compra com valor suspeito encontrada.',
+        mensagem:   'Nenhuma compra com valor suspeito encontrada.',
       })
     }
 
@@ -161,9 +163,10 @@ manutencaoRouter.post('/corrigir-valores-centavos', async (_req: Request, res: R
 
     const { rowCount: corrigidas } = await client.query(`
       UPDATE compras
-      SET valor = (valor / 100)::numeric
+      SET valor = valor / 100
       WHERE hotmart_transaction_id IS NULL
-        AND valor::numeric > 10000
+        AND valor > 200
+        AND valor = FLOOR(valor)
     `)
 
     const { rows: depois } = await client.query<{ id: string; valor: string }>(`

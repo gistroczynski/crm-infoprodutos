@@ -171,8 +171,8 @@ function normalizarValor(valorStr: string): number | null {
   const comPonto = limpo.replace(/\./g, '').replace(',', '.')
   const n = parseFloat(comPonto)
   if (isNaN(n)) return null
-  // Valores > 10.000 quase certamente estão em centavos (coluna financeira da Hotmart)
-  return n > 10000 ? n / 100 : n
+  // Inteiro acima do produto mais caro (~R$197) → está em centavos
+  return (n > 200 && Number.isInteger(n)) ? n / 100 : n
 }
 
 function parsearData(dataStr: string): Date | null {

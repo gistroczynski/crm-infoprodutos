@@ -79,6 +79,8 @@ const MAPA_TRANSACTION_ID = new Set([
   'transaction id', 'transacao', 'cod transacao', 'codigo transacao',
   'numero do pedido', 'numero pedido', 'order id', 'id transacao',
   'id da transacao', 'pedido', 'ref pedido',
+  // Nomes específicos do CSV da Hotmart:
+  'codigo da transacao', 'transacao hotmart', 'hotmart transaction id',
 ])
 
 function detectarColunas(cabecalhos: string[]): {

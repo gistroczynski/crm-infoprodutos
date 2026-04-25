@@ -23,13 +23,10 @@ const upload = multer({
 
 function normalizar(str: string): string {
   return str
+    .normalize('NFC')
     .toLowerCase()
     .trim()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')  // remove diacríticos (escape explícito evita bugs de encoding)
-    .replace(/[^a-z0-9 ]/g, ' ')     // substitui especiais (-, _, etc.) por espaço
     .replace(/\s+/g, ' ')
-    .trim()
 }
 
 const MAPA_EMAIL = new Set([
@@ -72,23 +69,26 @@ const MAPA_DATA_VENDA = new Set([
 // Colunas preferidas — "Preço da Oferta" é o valor bruto pago pelo comprador.
 // Separar em dois sets permite priorizar mesmo que "Valor" apareça antes no CSV.
 const MAPA_PRECO_PRIMARIO = new Set([
-  'preco da oferta', 'offer price', 'preco oferta',
+  'preco da oferta', 'preço da oferta', 'offer price', 'preco oferta', 'preço oferta',
 ])
 const MAPA_PRECO_SECUNDARIO = new Set([
-  'preco', 'valor', 'price', 'valor da venda', 'valor do produto', 'amount',
+  'preco', 'preço', 'valor', 'price', 'valor da venda', 'valor do produto', 'amount',
 ])
 
+// Todos os valores pré-normalizados com NFC para corresponder à saída de normalizar()
 const MAPA_VALOR_LIQUIDO = new Set([
-  'faturamento liquido',           // normalizado (sem acento)
-  'faturamento líquido',      // com acento preservado (U+00ED = í)
-  'faturamento_liquido',
-  'valor liquido',
-  'valor líquido',
-  'net revenue', 'net value', 'liquido',
-  'valor produtor', 'valor recebido', 'valor que voce recebeu',
-  'valor que voce recebeu convertido',
-  'voce recebeu', 'voce recebeu convertido',
-  'você recebeu', 'você recebeu convertido', // você com ê
+  normalizar('Faturamento líquido'),             // NFC: 'faturamento líquido' (U+00ED)
+  normalizar('Faturamento liquido'),             // sem acento
+  'faturamento líquido',                   // í explícito como U+00ED
+  'faturamento liquido',
+  normalizar('Valor que você recebeu convertido'),
+  normalizar('Valor que voce recebeu convertido'),
+  normalizar('você recebeu'),
+  normalizar('voce recebeu'),
+  normalizar('Valor líquido'),
+  normalizar('Valor liquido'),
+  'net revenue', 'net value', 'líquido', 'liquido',
+  'valor produtor', 'valor recebido',
 ])
 
 const MAPA_MOEDA = new Set([
@@ -97,11 +97,11 @@ const MAPA_MOEDA = new Set([
 
 const MAPA_TRANSACTION_ID = new Set([
   'cod pedido', 'codigo do pedido', 'codigo pedido', 'transaction',
-  'transaction id', 'transacao', 'cod transacao', 'codigo transacao',
-  'numero do pedido', 'numero pedido', 'order id', 'id transacao',
+  'transaction id', 'transacao', 'transação', 'cod transacao', 'codigo transacao',
+  'numero do pedido', 'número do pedido', 'numero pedido', 'order id', 'id transacao',
   'id da transacao', 'pedido', 'ref pedido',
   // Nomes específicos do CSV da Hotmart:
-  'codigo da transacao', 'transacao hotmart', 'hotmart transaction id',
+  'codigo da transacao', 'código da transação', 'transacao hotmart', 'hotmart transaction id',
 ])
 
 function detectarColunas(cabecalhos: string[]): {
@@ -140,6 +140,7 @@ function detectarColunas(cabecalhos: string[]): {
   } else {
     console.log('[detectarColunas] CSV tem menos de 56 colunas (total:', cabecalhos.length, ')')
   }
+  console.log('[detectarColunas] Todas as colunas normalizadas:', cabecalhos.map(normalizar))
 
   for (const h of cabecalhos) {
     const n = normalizar(h)
@@ -167,6 +168,8 @@ function detectarColunas(cabecalhos: string[]): {
     console.log('[detectarColunas] Usando fallback por posição para valor_liquido: coluna 56 =', JSON.stringify(col56))
     valorLiquidoCol = col56
   }
+
+  console.log('[detectarColunas] Coluna valor_liquido detectada:', valorLiquidoCol ?? 'NÃO ENCONTRADA')
 
   return { emailCol, telefoneCol, dddCol, nomeCol, statusCol, produtoNomeCol, dataVendaCol, precoCol, valorLiquidoCol, moedaCol, transactionIdCol }
 }

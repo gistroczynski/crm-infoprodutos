@@ -85,25 +85,47 @@ manutencaoRouter.post('/limpar-duplicatas-compras', async (_req: Request, res: R
 })
 
 // ── GET /api/manutencao/diagnostico-duplicatas ────────────────────────────
-// Contagem simples de duplicatas por hotmart_transaction_id.
+// Conta TODAS as compras — sem filtro por transaction_id.
 manutencaoRouter.get('/diagnostico-duplicatas', async (_req: Request, res: Response) => {
   try {
-    const row = await queryOne<{
-      total_compras: string
-      transacoes_unicas: string
-      duplicatas: string
-    }>(`
-      SELECT
-        COUNT(*)                                   AS total_compras,
-        COUNT(DISTINCT hotmart_transaction_id)     AS transacoes_unicas,
-        COUNT(*) - COUNT(DISTINCT hotmart_transaction_id) AS duplicatas
-      FROM compras
-      WHERE hotmart_transaction_id IS NOT NULL
-    `)
+    const [totais, porOrigem] = await Promise.all([
+      queryOne<{
+        total_compras: string
+        transacoes_unicas: string
+        duplicatas: string
+        sem_transaction_id: string
+      }>(`
+        SELECT
+          COUNT(*)                                              AS total_compras,
+          COUNT(DISTINCT hotmart_transaction_id)               AS transacoes_unicas,
+          COUNT(*) - COUNT(DISTINCT hotmart_transaction_id)    AS duplicatas,
+          COUNT(*) FILTER (WHERE hotmart_transaction_id IS NULL) AS sem_transaction_id
+        FROM compras
+      `),
+
+      pool.query<{ origem: string; quantidade: string }>(`
+        SELECT
+          CASE
+            WHEN hotmart_transaction_id LIKE 'HP%' THEN 'Hotmart real'
+            WHEN hotmart_transaction_id IS NULL     THEN 'Sem ID'
+            ELSE 'Outro'
+          END AS origem,
+          COUNT(*)::text AS quantidade
+        FROM compras
+        GROUP BY 1
+        ORDER BY 2 DESC
+      `),
+    ])
+
     res.json({
-      total_compras:     Number(row?.total_compras     ?? 0),
-      transacoes_unicas: Number(row?.transacoes_unicas ?? 0),
-      duplicatas:        Number(row?.duplicatas        ?? 0),
+      total_compras:      Number(totais?.total_compras      ?? 0),
+      transacoes_unicas:  Number(totais?.transacoes_unicas  ?? 0),
+      duplicatas:         Number(totais?.duplicatas         ?? 0),
+      sem_transaction_id: Number(totais?.sem_transaction_id ?? 0),
+      por_origem: porOrigem.rows.map(r => ({
+        origem:     r.origem,
+        quantidade: Number(r.quantidade),
+      })),
     })
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) })

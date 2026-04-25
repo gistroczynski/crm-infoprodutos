@@ -518,9 +518,23 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
 
     console.log(
       `[ImportarCSV/completo] encoding=${encoding} sep="${separador}" ` +
-      `colunas=${JSON.stringify(cabecalhos)}` +
+      `valorLiquidoCol=${JSON.stringify(valorLiquidoCol)} ` +
+      `transactionIdCol=${JSON.stringify(transactionIdCol)}` +
       `${amostra ? ` amostra=${amostra}` : ''}`
     )
+
+    // Mostra valores brutos das primeiras 5 linhas na coluna de valor_liquido
+    if (valorLiquidoCol) {
+      const amostraValores = registros.slice(0, 5).map(r => ({
+        raw: r[valorLiquidoCol!],
+        parsed: normalizarValor(r[valorLiquidoCol!] ?? ''),
+      }))
+      console.log('[ImportarCSV/completo] Amostra valor_liquido:', JSON.stringify(amostraValores))
+    } else {
+      console.log('[ImportarCSV/completo] ATENÇÃO: valorLiquidoCol não detectado — valor_liquido será null para todas as compras')
+      console.log('[ImportarCSV/completo] Total colunas no CSV:', cabecalhos.length)
+      console.log('[ImportarCSV/completo] Coluna índice 55:', JSON.stringify(cabecalhos[55] ?? 'inexistente'))
+    }
 
     if (!emailCol) {
       return res.status(400).json({
@@ -765,6 +779,10 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
                 `, [existente.id, valorLiquidoFinal, moeda ?? 'BRL'])
                 resultado.valor_liquido_atualizado++
               } else {
+                console.log(
+                  `[ImportarCSV/completo] compra_duplicada sem valor_liquido:` +
+                  ` id=${existente.id} transactionId=${transactionId} precoLiquido=${precoLiquido} preco=${preco}`
+                )
                 resultado.compras_duplicadas++
               }
               return

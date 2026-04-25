@@ -294,9 +294,8 @@ dashboardRouter.get('/evolucao', async (req: Request, res: Response) => {
           (data_compra AT TIME ZONE 'America/Sao_Paulo')::date AS data_compra,
           COALESCE(valor_liquido, valor)::numeric AS valor
         FROM compras
-        WHERE status IN (${statusFaturamento(inicio)})
+        WHERE status IN ('COMPLETE', 'COMPLETED', 'Completo', 'APPROVED')
           AND (moeda = 'BRL' OR moeda IS NULL)
-          AND COALESCE(valor_liquido, valor) IS NOT NULL
         ORDER BY COALESCE(hotmart_transaction_id, id::text), id
       )
       SELECT

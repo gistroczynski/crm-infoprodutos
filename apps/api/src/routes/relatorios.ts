@@ -116,7 +116,7 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
     const entradaRow = await (entradaIds.length > 0
       ? queryOne<{ total_clientes: number; receita: number }>(`
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
-                 COALESCE(SUM(co.valor::numeric), 0)::float AS receita
+                 COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
           FROM compras co
           WHERE co.status IN ('COMPLETE', 'APPROVED')
             AND co.produto_id = ANY($1::uuid[])
@@ -125,7 +125,7 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
         `, [entradaIds, inicio, fim])
       : queryOne<{ total_clientes: number; receita: number }>(`
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
-                 COALESCE(SUM(co.valor::numeric), 0)::float AS receita
+                 COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
           FROM compras co
           JOIN produtos p ON p.id = co.produto_id
           WHERE co.status IN ('COMPLETE', 'APPROVED')
@@ -137,7 +137,7 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
     // Order Bump
     const obRow = await queryOne<{ total_clientes: number; receita: number }>(`
       SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
-             COALESCE(SUM(co.valor::numeric), 0)::float AS receita
+             COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
       FROM compras co
       WHERE co.status IN ('COMPLETE', 'APPROVED')
         AND co.is_order_bump = true
@@ -149,7 +149,7 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
     const upsellRow = await (principalIds.length > 0
       ? queryOne<{ total_clientes: number; receita: number }>(`
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
-                 COALESCE(SUM(co.valor::numeric), 0)::float AS receita
+                 COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
           FROM compras co
           WHERE co.status IN ('COMPLETE', 'APPROVED')
             AND co.produto_id = ANY($1::uuid[])
@@ -158,7 +158,7 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
         `, [principalIds, inicio, fim])
       : queryOne<{ total_clientes: number; receita: number }>(`
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
-                 COALESCE(SUM(co.valor::numeric), 0)::float AS receita
+                 COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
           FROM compras co
           JOIN produtos p ON p.id = co.produto_id
           WHERE co.status IN ('COMPLETE', 'APPROVED')
@@ -268,13 +268,13 @@ relatoriosRouter.get('/produtos', async (req: Request, res: Response) => {
         p.nome,
         COALESCE(p.tipo, 'entrada')                AS tipo,
         COUNT(co.id)::int                          AS total_vendas,
-        COALESCE(SUM(co.valor::numeric), 0)::float AS receita,
-        COALESCE(AVG(co.valor::numeric), 0)::float AS ticket_medio,
+        COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita,
+        COALESCE(AVG(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS ticket_medio,
         COUNT(DISTINCT co.cliente_id)::int         AS novos_clientes
       FROM produtos p
       JOIN compras co ON co.produto_id = p.id
         AND co.status IN ('COMPLETE', 'APPROVED')
-        AND co.valor  IS NOT NULL
+        AND COALESCE(co.valor_liquido, co.valor) IS NOT NULL
         AND co.data_compra::date >= $1::date
         AND co.data_compra::date <= $2::date
       GROUP BY p.id, p.nome, p.tipo

@@ -161,7 +161,7 @@ manutencaoRouter.post('/corrigir-valores-centavos', async (_req: Request, res: R
 
     const { rowCount: corrigidas } = await client.query(`
       UPDATE compras
-      SET valor = (valor::numeric / 100)::text
+      SET valor = (valor / 100)::numeric
       WHERE hotmart_transaction_id IS NULL
         AND valor::numeric > 10000
     `)

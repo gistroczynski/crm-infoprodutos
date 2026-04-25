@@ -86,7 +86,7 @@ manutencaoRouter.post('/limpar-duplicatas-compras', async (_req: Request, res: R
 
 // ── POST /api/manutencao/limpar-compras-sem-id ────────────────────────────
 // Remove compras sem hotmart_transaction_id quando já existe uma compra
-// equivalente COM transaction_id para o mesmo cliente + produto (± 7 dias).
+// equivalente COM transaction_id para o mesmo cliente + produto na mesma data.
 // Compras sem ID sem correspondente são mantidas — são compras reais importadas.
 manutencaoRouter.post('/limpar-compras-sem-id', async (_req: Request, res: Response) => {
   const client = await pool.connect()
@@ -106,12 +106,10 @@ manutencaoRouter.post('/limpar-compras-sem-id', async (_req: Request, res: Respo
           WHERE c_sem.hotmart_transaction_id IS NULL
             AND EXISTS (
               SELECT 1 FROM compras c_com
-              WHERE c_com.cliente_id = c_sem.cliente_id
-                AND c_com.produto_id = c_sem.produto_id
+              WHERE c_com.cliente_id              = c_sem.cliente_id
+                AND c_com.produto_id              = c_sem.produto_id
                 AND c_com.hotmart_transaction_id IS NOT NULL
-                AND ABS(
-                  EXTRACT(EPOCH FROM (c_com.data_compra::date - c_sem.data_compra::date))
-                ) < 86400 * 7
+                AND DATE(c_com.data_compra)       = DATE(c_sem.data_compra)
             )
         )
     `)

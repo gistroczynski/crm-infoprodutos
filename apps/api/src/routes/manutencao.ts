@@ -134,6 +134,58 @@ manutencaoRouter.post('/limpar-compras-sem-id', async (_req: Request, res: Respo
   }
 })
 
+// ── POST /api/manutencao/corrigir-valores-centavos ────────────────────────
+// Divide por 100 compras cujo valor > 10.000 — sinal de que foram
+// importadas em centavos em vez de reais.
+manutencaoRouter.post('/corrigir-valores-centavos', async (_req: Request, res: Response) => {
+  const client = await pool.connect()
+  try {
+    const { rows: antes } = await client.query<{ id: string; valor: string }>(`
+      SELECT id, valor::text
+      FROM compras
+      WHERE hotmart_transaction_id IS NULL
+        AND valor::numeric > 10000
+      ORDER BY valor::numeric DESC
+      LIMIT 100
+    `)
+
+    if (antes.length === 0) {
+      return res.json({
+        success:   true,
+        corrigidas: 0,
+        mensagem:  'Nenhuma compra com valor suspeito encontrada.',
+      })
+    }
+
+    await client.query('BEGIN')
+
+    const { rowCount: corrigidas } = await client.query(`
+      UPDATE compras
+      SET valor = (valor::numeric / 100)::text
+      WHERE hotmart_transaction_id IS NULL
+        AND valor::numeric > 10000
+    `)
+
+    const { rows: depois } = await client.query<{ id: string; valor: string }>(`
+      SELECT id, valor::text FROM compras WHERE id = ANY($1)
+    `, [antes.map(r => r.id)])
+
+    await client.query('COMMIT')
+
+    res.json({
+      success:    true,
+      corrigidas: corrigidas ?? 0,
+      valores_antes:  antes.map(r  => ({ id: r.id,  valor: Number(r.valor)  })),
+      valores_depois: depois.map(r => ({ id: r.id,  valor: Number(r.valor)  })),
+    })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    res.status(500).json({ success: false, error: String(err) })
+  } finally {
+    client.release()
+  }
+})
+
 // ── GET /api/manutencao/diagnostico-duplicatas ────────────────────────────
 // Conta TODAS as compras — sem filtro por transaction_id.
 manutencaoRouter.get('/diagnostico-duplicatas', async (_req: Request, res: Response) => {

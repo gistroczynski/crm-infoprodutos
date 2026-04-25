@@ -69,9 +69,13 @@ const MAPA_DATA_VENDA = new Set([
   'purchase date', 'sale date', 'data',
 ])
 
-const MAPA_PRECO = new Set([
-  'preco da oferta', 'preco', 'valor', 'price', 'offer price',
-  'valor da venda', 'valor do produto', 'amount',
+// Colunas preferidas — "Preço da Oferta" é o valor bruto pago pelo comprador.
+// Separar em dois sets permite priorizar mesmo que "Valor" apareça antes no CSV.
+const MAPA_PRECO_PRIMARIO = new Set([
+  'preco da oferta', 'offer price', 'preco oferta',
+])
+const MAPA_PRECO_SECUNDARIO = new Set([
+  'preco', 'valor', 'price', 'valor da venda', 'valor do produto', 'amount',
 ])
 
 const MAPA_TRANSACTION_ID = new Set([
@@ -98,24 +102,30 @@ function detectarColunas(cabecalhos: string[]): {
   let telefoneCol:      string | null = null
   let dddCol:           string | null = null
   let nomeCol:          string | null = null
-  let statusCol:        string | null = null
-  let produtoNomeCol:   string | null = null
-  let dataVendaCol:     string | null = null
-  let precoCol:         string | null = null
-  let transactionIdCol: string | null = null
+  let statusCol:          string | null = null
+  let produtoNomeCol:     string | null = null
+  let dataVendaCol:       string | null = null
+  let precoCol:           string | null = null
+  let precoColPrimario:   string | null = null
+  let precoColSecundario: string | null = null
+  let transactionIdCol:   string | null = null
 
   for (const h of cabecalhos) {
     const n = normalizar(h)
-    if (!emailCol         && MAPA_EMAIL.has(n))          emailCol         = h
-    if (!telefoneCol      && MAPA_TELEFONE.has(n))       telefoneCol      = h
-    if (!dddCol           && MAPA_DDD.has(n))            dddCol           = h
-    if (!nomeCol          && MAPA_NOME.has(n))           nomeCol          = h
-    if (!statusCol        && MAPA_STATUS.has(n))         statusCol        = h
-    if (!produtoNomeCol   && MAPA_PRODUTO_NOME.has(n))   produtoNomeCol   = h
-    if (!dataVendaCol     && MAPA_DATA_VENDA.has(n))     dataVendaCol     = h
-    if (!precoCol         && MAPA_PRECO.has(n))          precoCol         = h
-    if (!transactionIdCol && MAPA_TRANSACTION_ID.has(n)) transactionIdCol = h
+    if (!emailCol            && MAPA_EMAIL.has(n))             emailCol            = h
+    if (!telefoneCol         && MAPA_TELEFONE.has(n))          telefoneCol         = h
+    if (!dddCol              && MAPA_DDD.has(n))               dddCol              = h
+    if (!nomeCol             && MAPA_NOME.has(n))              nomeCol             = h
+    if (!statusCol           && MAPA_STATUS.has(n))            statusCol           = h
+    if (!produtoNomeCol      && MAPA_PRODUTO_NOME.has(n))      produtoNomeCol      = h
+    if (!dataVendaCol        && MAPA_DATA_VENDA.has(n))        dataVendaCol        = h
+    if (!precoColPrimario    && MAPA_PRECO_PRIMARIO.has(n))    precoColPrimario    = h
+    if (!precoColSecundario  && MAPA_PRECO_SECUNDARIO.has(n))  precoColSecundario  = h
+    if (!transactionIdCol    && MAPA_TRANSACTION_ID.has(n))    transactionIdCol    = h
   }
+
+  // Prefere "Preço da Oferta" (valor bruto pago) sobre colunas genéricas como "Valor"
+  precoCol = precoColPrimario ?? precoColSecundario
 
   return { emailCol, telefoneCol, dddCol, nomeCol, statusCol, produtoNomeCol, dataVendaCol, precoCol, transactionIdCol }
 }
@@ -152,16 +162,17 @@ function combinarDddTelefone(
   return tel
 }
 
-function parsearPreco(precoStr: string): number | null {
-  if (!precoStr) return null
-  // Remove "R$", pontos de milhar, troca vírgula por ponto
-  const limpo = precoStr
-    .replace(/R\$\s*/g, '')
-    .replace(/\./g, '')
-    .replace(',', '.')
-    .trim()
-  const n = parseFloat(limpo)
-  return isNaN(n) ? null : n
+function normalizarValor(valorStr: string): number | null {
+  if (!valorStr) return null
+  // Remove símbolo de moeda, espaços e caracteres não numéricos (exceto , e .)
+  const limpo = valorStr.replace(/R\$\s*/g, '').replace(/[^\d,.]/g, '').trim()
+  if (!limpo) return null
+  // Formato brasileiro: 1.234,56 → remove pontos de milhar, troca vírgula por ponto decimal
+  const comPonto = limpo.replace(/\./g, '').replace(',', '.')
+  const n = parseFloat(comPonto)
+  if (isNaN(n)) return null
+  // Valores > 10.000 quase certamente estão em centavos (coluna financeira da Hotmart)
+  return n > 10000 ? n / 100 : n
 }
 
 function parsearData(dataStr: string): Date | null {
@@ -524,7 +535,7 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
             email,
             produtoNome,
             dataVenda:     dataVendaCol     ? parsearData(linha[dataVendaCol] ?? '')  : null,
-            preco:         precoCol         ? parsearPreco(linha[precoCol] ?? '')     : null,
+            preco:         precoCol         ? normalizarValor(linha[precoCol] ?? '')  : null,
             transactionId,
           })
         }

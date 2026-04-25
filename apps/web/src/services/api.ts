@@ -108,6 +108,8 @@ export const produtosApi = {
 export interface DashboardResumo {
   faturamento_total: number
   faturamento_mes_atual: number
+  faturamento_brl: number
+  faturamento_usd: number
   ticket_medio: number
   total_clientes: number
   clientes_com_principal: number

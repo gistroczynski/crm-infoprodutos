@@ -602,15 +602,16 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
 
     // ── Upsert de clientes ─────────────────────────────────────────────────
     const resultado = {
-      total_linhas_csv:     registros.length,
-      filtrados_por_status: filtradosPorStatus,
-      emails_unicos:        emailsUnicos,
-      criados:              0,
-      atualizados:          0,
-      sem_telefone:         0,
-      compras_inseridas:    0,
-      compras_duplicadas:   0,
-      erros:                0,
+      total_linhas_csv:          registros.length,
+      filtrados_por_status:      filtradosPorStatus,
+      emails_unicos:             emailsUnicos,
+      criados:                   0,
+      atualizados:               0,
+      sem_telefone:              0,
+      compras_inseridas:         0,
+      compras_duplicadas:        0,
+      valor_liquido_atualizado:  0,
+      erros:                     0,
     }
 
     // Mapa email → cliente_id para uso na etapa de compras
@@ -726,16 +727,17 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
             const valorLiquidoFinal = precoLiquido ?? (transactionId ? null : preco)
 
             if (existente) {
-              resultado.compras_duplicadas++
-              // Atualiza valor_liquido/moeda se antes estava vazio e agora temos o dado
               if (valorLiquidoFinal != null) {
                 await pool.query(`
                   UPDATE compras
                   SET valor_liquido = $2,
-                      moeda         = COALESCE($3, moeda)
+                      moeda         = COALESCE($3, moeda),
+                      updated_at    = NOW()
                   WHERE id = $1
-                    AND (valor_liquido IS NULL OR $2 IS NOT NULL)
                 `, [existente.id, valorLiquidoFinal, moeda ?? 'BRL'])
+                resultado.valor_liquido_atualizado++
+              } else {
+                resultado.compras_duplicadas++
               }
               return
             }
@@ -772,6 +774,7 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
       ` sem_telefone=${resultado.sem_telefone}` +
       ` compras_inseridas=${resultado.compras_inseridas}` +
       ` compras_duplicadas=${resultado.compras_duplicadas}` +
+      ` valor_liquido_atualizado=${resultado.valor_liquido_atualizado}` +
       ` erros=${resultado.erros}`
     )
 

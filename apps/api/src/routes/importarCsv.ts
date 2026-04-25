@@ -26,7 +26,7 @@ function normalizar(str: string): string {
     .toLowerCase()
     .trim()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')  // remove diacríticos
+    .replace(/[̀-ͯ]/g, '')  // remove diacríticos (escape explícito evita bugs de encoding)
     .replace(/[^a-z0-9 ]/g, ' ')     // substitui especiais (-, _, etc.) por espaço
     .replace(/\s+/g, ' ')
     .trim()
@@ -312,6 +312,9 @@ importarCsvRouter.post('/preview', upload.single('arquivo'), async (req: Request
         status:         cols.statusCol,
         produto_nome:   cols.produtoNomeCol,
         data_venda:     cols.dataVendaCol,
+        preco:          cols.precoCol,
+        valor_liquido:  cols.valorLiquidoCol,
+        moeda:          cols.moedaCol,
         transaction_id: cols.transactionIdCol,
       },
       preview:    registros.slice(0, 5),
@@ -719,13 +722,23 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
               `, [clienteId, produtoId, dataVenda ? dataVenda.toISOString() : null])
             }
 
-            if (existente) {
-              resultado.compras_duplicadas++
-              return
-            }
-
             // CSV sem transaction_id: valor_liquido = valor (o que o produtor informou)
             const valorLiquidoFinal = precoLiquido ?? (transactionId ? null : preco)
+
+            if (existente) {
+              resultado.compras_duplicadas++
+              // Atualiza valor_liquido/moeda se antes estava vazio e agora temos o dado
+              if (valorLiquidoFinal != null) {
+                await pool.query(`
+                  UPDATE compras
+                  SET valor_liquido = $2,
+                      moeda         = COALESCE($3, moeda)
+                  WHERE id = $1
+                    AND (valor_liquido IS NULL OR $2 IS NOT NULL)
+                `, [existente.id, valorLiquidoFinal, moeda ?? 'BRL'])
+              }
+              return
+            }
 
             await pool.query(`
               INSERT INTO compras
@@ -794,6 +807,8 @@ importarCsvRouter.post('/debug-colunas', upload.single('arquivo'), async (req: R
         produto_nome:   cols.produtoNomeCol,
         data_venda:     cols.dataVendaCol,
         preco:          cols.precoCol,
+        valor_liquido:  cols.valorLiquidoCol,
+        moeda:          cols.moedaCol,
         transaction_id: cols.transactionIdCol,
       },
     })

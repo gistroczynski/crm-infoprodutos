@@ -19,14 +19,17 @@ function parseDateRange(req: Request): { inicio: string; fim: string } {
 
 /**
  * Retorna a lista de status SQL para queries de faturamento.
- * Inclui APPROVED quando fim está nos últimos 7 dias: vendas recentes
- * chegam pelo webhook como APPROVED e só viram COMPLETE após alguns dias.
+ * Inclui APPROVED apenas quando inicio >= hoje - 7 dias (período curto/recente).
+ * Exemplos:
+ *   Hoje       → inicio = hoje    → inclui APPROVED ✅
+ *   Esta semana → inicio = seg    → inclui APPROVED ✅
+ *   Este mês   → inicio = 01/mm  → exclui APPROVED ✅ (inicio é antigo)
+ *   Este ano   → inicio = 01/01  → exclui APPROVED ✅
  */
-function statusFaturamento(fim: string): string {
-  const hoje = new Date()
-  const fimDate = new Date(fim + 'T23:59:59Z')
-  const diasDesdeFim = (hoje.getTime() - fimDate.getTime()) / 86_400_000
-  return diasDesdeFim <= 7
+function statusFaturamento(inicio: string): string {
+  const seteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+  const dataInicio = new Date(inicio + 'T00:00:00Z')
+  return dataInicio >= seteDiasAtras
     ? `'COMPLETE', 'COMPLETED', 'Completo', 'APPROVED'`
     : `'COMPLETE', 'COMPLETED', 'Completo'`
 }
@@ -67,7 +70,7 @@ async function buscarEtapaFunil(
           co.cliente_id,
           COALESCE(co.valor_liquido, co.valor)::numeric AS valor
         FROM compras co
-        WHERE co.status IN (${statusFaturamento(fim)})
+        WHERE co.status IN (${statusFaturamento(inicio)})
           AND (co.moeda = 'BRL' OR co.moeda IS NULL)
           AND co.produto_id = ANY($1::uuid[])
           AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
@@ -87,7 +90,7 @@ async function buscarEtapaFunil(
         COALESCE(co.valor_liquido, co.valor)::numeric AS valor
       FROM compras co
       JOIN produtos p ON p.id = co.produto_id
-      WHERE co.status IN (${statusFaturamento(fim)})
+      WHERE co.status IN (${statusFaturamento(inicio)})
         AND (co.moeda = 'BRL' OR co.moeda IS NULL)
         AND COALESCE(p.tipo, 'entrada') = $1
         AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
@@ -144,7 +147,7 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
           SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
             COALESCE(valor_liquido, valor)::numeric AS valor
           FROM compras
-          WHERE status IN (${statusFaturamento(fim)})
+          WHERE status IN (${statusFaturamento(inicio)})
             AND (moeda = 'BRL' OR moeda IS NULL)
             AND COALESCE(valor_liquido, valor) IS NOT NULL
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
@@ -162,7 +165,7 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
           SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
             COALESCE(valor_liquido, valor)::numeric AS valor
           FROM compras
-          WHERE status IN (${statusFaturamento(fim)})
+          WHERE status IN (${statusFaturamento(inicio)})
             AND moeda = 'USD'
             AND COALESCE(valor_liquido, valor) IS NOT NULL
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
@@ -181,7 +184,7 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
           COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
         FROM produtos p
         JOIN compras co ON co.produto_id = p.id
-          AND co.status IN (${statusFaturamento(fim)})
+          AND co.status IN (${statusFaturamento(inicio)})
           AND COALESCE(co.valor_liquido, co.valor) IS NOT NULL
           AND (co.moeda = 'BRL' OR co.moeda IS NULL)
           AND co.data_compra::date >= $1::date
@@ -239,7 +242,7 @@ dashboardRouter.get('/funil', async (req: Request, res: Response) => {
         COUNT(DISTINCT co.cliente_id)::int         AS total_clientes,
         COALESCE(SUM(co.valor::numeric), 0)::float AS receita
       FROM compras co
-      WHERE co.status IN (${statusFaturamento(fim)})
+      WHERE co.status IN (${statusFaturamento(inicio)})
         AND co.is_order_bump = true
         AND co.data_compra::date >= $1::date
         AND co.data_compra::date <= $2::date
@@ -291,7 +294,7 @@ dashboardRouter.get('/evolucao', async (req: Request, res: Response) => {
           (data_compra AT TIME ZONE 'America/Sao_Paulo')::date AS data_compra,
           COALESCE(valor_liquido, valor)::numeric AS valor
         FROM compras
-        WHERE status IN (${statusFaturamento(fim)})
+        WHERE status IN (${statusFaturamento(inicio)})
           AND (moeda = 'BRL' OR moeda IS NULL)
           AND COALESCE(valor_liquido, valor) IS NOT NULL
         ORDER BY COALESCE(hotmart_transaction_id, id::text), id
@@ -319,7 +322,7 @@ dashboardRouter.get('/diagnostico-faturamento', async (req: Request, res: Respon
       queryOne<{ total: number; receita: number }>(`
         SELECT COUNT(*)::int AS total, COALESCE(SUM(valor::numeric),0)::float AS receita
         FROM compras
-        WHERE status IN (${statusFaturamento(fim)}) AND valor IS NOT NULL
+        WHERE status IN (${statusFaturamento(inicio)}) AND valor IS NOT NULL
           AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
           AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
       `, [inicio, fim]),
@@ -330,7 +333,7 @@ dashboardRouter.get('/diagnostico-faturamento', async (req: Request, res: Respon
           SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
             valor::numeric AS valor
           FROM compras
-          WHERE status IN (${statusFaturamento(fim)}) AND valor IS NOT NULL
+          WHERE status IN (${statusFaturamento(inicio)}) AND valor IS NOT NULL
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
           ORDER BY COALESCE(hotmart_transaction_id, id::text), id
@@ -343,7 +346,7 @@ dashboardRouter.get('/diagnostico-faturamento', async (req: Request, res: Respon
           COUNT(*)::int          AS ocorrencias,
           SUM(valor::numeric)::float AS valor_total
         FROM compras
-        WHERE status IN (${statusFaturamento(fim)}) AND valor IS NOT NULL
+        WHERE status IN (${statusFaturamento(inicio)}) AND valor IS NOT NULL
           AND hotmart_transaction_id IS NOT NULL
           AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
           AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date

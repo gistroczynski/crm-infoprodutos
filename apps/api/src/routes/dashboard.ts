@@ -51,9 +51,10 @@ async function buscarEtapaFunil(
       FROM (
         SELECT DISTINCT ON (COALESCE(co.hotmart_transaction_id, co.id::text))
           co.cliente_id,
-          co.valor::numeric AS valor
+          COALESCE(co.valor_liquido, co.valor)::numeric AS valor
         FROM compras co
         WHERE co.status IN ('COMPLETE', 'APPROVED')
+          AND (co.moeda = 'BRL' OR co.moeda IS NULL)
           AND co.produto_id = ANY($1::uuid[])
           AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
           AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
@@ -69,10 +70,11 @@ async function buscarEtapaFunil(
     FROM (
       SELECT DISTINCT ON (COALESCE(co.hotmart_transaction_id, co.id::text))
         co.cliente_id,
-        co.valor::numeric AS valor
+        COALESCE(co.valor_liquido, co.valor)::numeric AS valor
       FROM compras co
       JOIN produtos p ON p.id = co.produto_id
       WHERE co.status IN ('COMPLETE', 'APPROVED')
+        AND (co.moeda = 'BRL' OR co.moeda IS NULL)
         AND COALESCE(p.tipo, 'entrada') = $1
         AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
         AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
@@ -116,38 +118,58 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
   try {
     const { inicio, fim } = parseDateRange(req)
 
-    const [periodo, porProduto, clientes] = await Promise.all([
+    const [periodo, faturamentoUsd, porProduto, clientes] = await Promise.all([
 
-      // Faturamento + compras no período — deduplicado por transaction_id
+      // Faturamento BRL líquido — deduplicado por transaction_id
       queryOne<{ faturamento: number; total_compras: number; ticket_medio: number }>(`
         SELECT
-          COALESCE(SUM(v.valor), 0)::float   AS faturamento,
-          COUNT(*)::int                       AS total_compras,
-          COALESCE(AVG(v.valor), 0)::float   AS ticket_medio
+          COALESCE(SUM(v.valor), 0)::float  AS faturamento,
+          COUNT(*)::int                     AS total_compras,
+          COALESCE(AVG(v.valor), 0)::float  AS ticket_medio
         FROM (
           SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
-            valor::numeric AS valor
+            COALESCE(valor_liquido, valor)::numeric AS valor
           FROM compras
           WHERE status IN ('COMPLETE', 'APPROVED')
-            AND valor IS NOT NULL
+            AND (moeda = 'BRL' OR moeda IS NULL)
+            AND COALESCE(valor_liquido, valor) IS NOT NULL
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
           ORDER BY COALESCE(hotmart_transaction_id, id::text), id
         ) v
       `, [inicio, fim]),
 
-      // Top produtos no período — INNER JOIN para garantir sem duplicatas
+      // Faturamento USD líquido — separado, sem converter
+      queryOne<{ faturamento: number; total_compras: number }>(`
+        SELECT
+          COALESCE(SUM(v.valor), 0)::float AS faturamento,
+          COUNT(*)::int                    AS total_compras
+        FROM (
+          SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
+            COALESCE(valor_liquido, valor)::numeric AS valor
+          FROM compras
+          WHERE status IN ('COMPLETE', 'APPROVED')
+            AND moeda = 'USD'
+            AND COALESCE(valor_liquido, valor) IS NOT NULL
+            AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+            AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+          ORDER BY COALESCE(hotmart_transaction_id, id::text), id
+        ) v
+      `, [inicio, fim]),
+
+      // Top produtos no período — usa valor líquido
       query<{ produto_id: string; nome: string; tipo: string; total_vendas: number; receita: number }>(`
         SELECT
-          p.id                                       AS produto_id,
+          p.id                                                             AS produto_id,
           p.nome,
-          COALESCE(p.tipo, 'entrada')                AS tipo,
-          COUNT(co.id)::int                          AS total_vendas,
-          COALESCE(SUM(co.valor::numeric), 0)::float AS receita
+          COALESCE(p.tipo, 'entrada')                                      AS tipo,
+          COUNT(co.id)::int                                                AS total_vendas,
+          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
         FROM produtos p
         JOIN compras co ON co.produto_id = p.id
           AND co.status IN ('COMPLETE', 'APPROVED')
-          AND co.valor IS NOT NULL
+          AND COALESCE(co.valor_liquido, co.valor) IS NOT NULL
+          AND (co.moeda = 'BRL' OR co.moeda IS NULL)
           AND co.data_compra::date >= $1::date
           AND co.data_compra::date <= $2::date
         GROUP BY p.id, p.nome, p.tipo
@@ -174,8 +196,10 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
     const taxaAscensao = totalC > 0 ? Math.round((comPrincipal / totalC) * 100) : 0
 
     res.json({
-      faturamento_total:      periodo?.faturamento   ?? 0,
-      faturamento_mes_atual:  periodo?.faturamento   ?? 0, // alias — agora igual ao total do período
+      faturamento_total:      periodo?.faturamento   ?? 0, // BRL líquido
+      faturamento_mes_atual:  periodo?.faturamento   ?? 0,
+      faturamento_brl:        periodo?.faturamento   ?? 0,
+      faturamento_usd:        faturamentoUsd?.faturamento ?? 0,
       ticket_medio:           periodo?.ticket_medio  ?? 0,
       total_clientes:         totalC,
       clientes_com_principal: comPrincipal,
@@ -251,10 +275,11 @@ dashboardRouter.get('/evolucao', async (req: Request, res: Response) => {
       compras_unicas AS (
         SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
           (data_compra AT TIME ZONE 'America/Sao_Paulo')::date AS data_compra,
-          valor::numeric AS valor
+          COALESCE(valor_liquido, valor)::numeric AS valor
         FROM compras
         WHERE status IN ('COMPLETE', 'APPROVED')
-          AND valor IS NOT NULL
+          AND (moeda = 'BRL' OR moeda IS NULL)
+          AND COALESCE(valor_liquido, valor) IS NOT NULL
         ORDER BY COALESCE(hotmart_transaction_id, id::text), id
       )
       SELECT

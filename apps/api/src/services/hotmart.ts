@@ -44,6 +44,7 @@ export interface HotmartSaleItem {
     offer?: { code?: string; payment_mode?: string }
     payment?: { type?: string; installments_number?: number; refusal_reason?: string }
     hotmart_fee?: { total?: number; base?: number; percentage?: number; currency_code?: string }
+    commission?: { value?: number; currency_code?: string }
     commission_as?: string
     purchase_subscription?: unknown
     recurrency_number?: number
@@ -519,6 +520,12 @@ export class HotmartService {
       compra: {
         hotmart_transaction_id: item.purchase.transaction,
         valor:         item.purchase.price?.value ?? null,
+        // Valor líquido: commission.value (campo direto) ou price - hotmart_fee
+        valor_liquido: item.purchase.commission?.value
+          ?? (item.purchase.price?.value != null && item.purchase.hotmart_fee?.total != null
+            ? item.purchase.price.value - item.purchase.hotmart_fee.total
+            : null),
+        moeda:         item.purchase.price?.currency_code ?? 'BRL',
         status:        item.purchase.status,
         data_compra:   new Date(item.purchase.order_date),
         is_order_bump: item.purchase.is_order_bump ?? false,

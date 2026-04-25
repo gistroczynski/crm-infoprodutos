@@ -23,6 +23,8 @@ export interface UpsertCompraData {
   cliente_id: string
   produto_id: string
   valor?: number | null
+  valor_liquido?: number | null
+  moeda?: string | null
   status: string
   data_compra: Date | string
   is_order_bump?: boolean
@@ -107,12 +109,15 @@ export async function buscarProdutoPorHotmartId(hotmartId: string) {
 export async function upsertCompra(dados: UpsertCompraData): Promise<{ id: string; novo: boolean }> {
   const resultado = await queryOne<{ id: string; xmax: string }>(`
     INSERT INTO compras (
-      hotmart_transaction_id, cliente_id, produto_id, valor, status, data_compra,
-      is_order_bump, motivo_classificacao, offer_code, purchase_type, payload_raw
+      hotmart_transaction_id, cliente_id, produto_id, valor, valor_liquido, moeda,
+      status, data_compra, is_order_bump, motivo_classificacao, offer_code,
+      purchase_type, payload_raw
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     ON CONFLICT (hotmart_transaction_id) DO UPDATE SET
       status                = EXCLUDED.status,
+      valor_liquido         = COALESCE(EXCLUDED.valor_liquido, compras.valor_liquido),
+      moeda                 = COALESCE(EXCLUDED.moeda, compras.moeda),
       is_order_bump         = EXCLUDED.is_order_bump,
       motivo_classificacao  = COALESCE(EXCLUDED.motivo_classificacao, compras.motivo_classificacao),
       offer_code            = COALESCE(EXCLUDED.offer_code, compras.offer_code),
@@ -124,6 +129,8 @@ export async function upsertCompra(dados: UpsertCompraData): Promise<{ id: strin
     dados.cliente_id,
     dados.produto_id,
     dados.valor ?? null,
+    dados.valor_liquido ?? null,
+    dados.moeda ?? 'BRL',
     dados.status,
     dados.data_compra,
     dados.is_order_bump ?? false,

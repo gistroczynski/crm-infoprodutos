@@ -78,6 +78,16 @@ const MAPA_PRECO_SECUNDARIO = new Set([
   'preco', 'valor', 'price', 'valor da venda', 'valor do produto', 'amount',
 ])
 
+const MAPA_VALOR_LIQUIDO = new Set([
+  'faturamento liquido', 'valor liquido', 'net revenue', 'net value', 'liquido',
+  'valor produtor', 'valor recebido', 'valor que voce recebeu',
+  'valor que voce recebeu convertido',
+])
+
+const MAPA_MOEDA = new Set([
+  'moeda', 'currency', 'currency code', 'moeda da transacao', 'moeda transacao',
+])
+
 const MAPA_TRANSACTION_ID = new Set([
   'cod pedido', 'codigo do pedido', 'codigo pedido', 'transaction',
   'transaction id', 'transacao', 'cod transacao', 'codigo transacao',
@@ -96,6 +106,8 @@ function detectarColunas(cabecalhos: string[]): {
   produtoNomeCol:    string | null
   dataVendaCol:      string | null
   precoCol:          string | null
+  valorLiquidoCol:   string | null
+  moedaCol:          string | null
   transactionIdCol:  string | null
 } {
   let emailCol:         string | null = null
@@ -108,6 +120,8 @@ function detectarColunas(cabecalhos: string[]): {
   let precoCol:           string | null = null
   let precoColPrimario:   string | null = null
   let precoColSecundario: string | null = null
+  let valorLiquidoCol:    string | null = null
+  let moedaCol:           string | null = null
   let transactionIdCol:   string | null = null
 
   for (const h of cabecalhos) {
@@ -121,13 +135,15 @@ function detectarColunas(cabecalhos: string[]): {
     if (!dataVendaCol        && MAPA_DATA_VENDA.has(n))        dataVendaCol        = h
     if (!precoColPrimario    && MAPA_PRECO_PRIMARIO.has(n))    precoColPrimario    = h
     if (!precoColSecundario  && MAPA_PRECO_SECUNDARIO.has(n))  precoColSecundario  = h
+    if (!valorLiquidoCol     && MAPA_VALOR_LIQUIDO.has(n))     valorLiquidoCol     = h
+    if (!moedaCol            && MAPA_MOEDA.has(n))             moedaCol            = h
     if (!transactionIdCol    && MAPA_TRANSACTION_ID.has(n))    transactionIdCol    = h
   }
 
   // Prefere "Preço da Oferta" (valor bruto pago) sobre colunas genéricas como "Valor"
   precoCol = precoColPrimario ?? precoColSecundario
 
-  return { emailCol, telefoneCol, dddCol, nomeCol, statusCol, produtoNomeCol, dataVendaCol, precoCol, transactionIdCol }
+  return { emailCol, telefoneCol, dddCol, nomeCol, statusCol, produtoNomeCol, dataVendaCol, precoCol, valorLiquidoCol, moedaCol, transactionIdCol }
 }
 
 // ── Helpers para dados da Hotmart ──────────────────────────────────────────
@@ -466,7 +482,7 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
     const cabecalhos = Object.keys(registros[0])
     const {
       emailCol, telefoneCol, dddCol, nomeCol, statusCol,
-      produtoNomeCol, dataVendaCol, precoCol, transactionIdCol,
+      produtoNomeCol, dataVendaCol, precoCol, valorLiquidoCol, moedaCol, transactionIdCol,
     } = detectarColunas(cabecalhos)
 
     console.log(
@@ -493,6 +509,8 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
       produtoNome:   string
       dataVenda:     Date | null
       preco:         number | null
+      precoLiquido:  number | null
+      moeda:         string | null
       transactionId: string | null
     }
 
@@ -534,8 +552,10 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
           comprasLote.push({
             email,
             produtoNome,
-            dataVenda:     dataVendaCol     ? parsearData(linha[dataVendaCol] ?? '')  : null,
-            preco:         precoCol         ? normalizarValor(linha[precoCol] ?? '')  : null,
+            dataVenda:    dataVendaCol    ? parsearData(linha[dataVendaCol] ?? '')       : null,
+            preco:        precoCol        ? normalizarValor(linha[precoCol] ?? '')        : null,
+            precoLiquido: valorLiquidoCol ? normalizarValor(linha[valorLiquidoCol] ?? '') : null,
+            moeda:        moedaCol        ? (linha[moedaCol]?.trim().toUpperCase() || null) : null,
             transactionId,
           })
         }
@@ -675,7 +695,7 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
       for (let i = 0; i < comprasParaInserir.length; i += LOTE_COMPRAS) {
         const lote = comprasParaInserir.slice(i, i + LOTE_COMPRAS)
 
-        await Promise.all(lote.map(async ({ email, produtoNome, dataVenda, preco, transactionId }) => {
+        await Promise.all(lote.map(async ({ email, produtoNome, dataVenda, preco, precoLiquido, moeda, transactionId }) => {
           const clienteId = emailParaClienteId.get(email)
           const produtoId = produtoIdPorNome.get(produtoNome)
           if (!clienteId || !produtoId) return
@@ -704,14 +724,20 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
               return
             }
 
+            // CSV sem transaction_id: valor_liquido = valor (o que o produtor informou)
+            const valorLiquidoFinal = precoLiquido ?? (transactionId ? null : preco)
+
             await pool.query(`
               INSERT INTO compras
-                (cliente_id, produto_id, valor, status, data_compra, hotmart_transaction_id)
-              VALUES ($1, $2, $3, $4, $5, $6)
+                (cliente_id, produto_id, valor, valor_liquido, moeda,
+                 status, data_compra, hotmart_transaction_id)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             `, [
               clienteId,
               produtoId,
               preco,
+              valorLiquidoFinal,
+              moeda ?? 'BRL',
               'COMPLETE',
               dataVenda ? dataVenda.toISOString() : null,
               transactionId ?? null,

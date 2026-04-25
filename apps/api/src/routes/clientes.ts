@@ -142,7 +142,8 @@ clientesRouter.get('/:id', async (req: Request, res: Response) => {
 
       query<{
         id: string; produto_nome: string; produto_tipo: string
-        is_order_bump: boolean; valor: number | null; data_compra: string; dias_atras: number
+        is_order_bump: boolean; valor: number | null; valor_liquido: number | null
+        data_compra: string; dias_atras: number
         hotmart_transaction_id: string | null
       }>(`
         SELECT
@@ -151,6 +152,7 @@ clientesRouter.get('/:id', async (req: Request, res: Response) => {
           COALESCE(p.tipo, 'entrada')                          AS produto_tipo,
           COALESCE(co.is_order_bump, false)                    AS is_order_bump,
           co.valor::float                                      AS valor,
+          co.valor_liquido::float                              AS valor_liquido,
           co.data_compra::date::text                           AS data_compra,
           (CURRENT_DATE - co.data_compra::date)::int           AS dias_atras,
           co.hotmart_transaction_id
@@ -172,7 +174,9 @@ clientesRouter.get('/:id', async (req: Request, res: Response) => {
       const key = c.hotmart_transaction_id ? `t_${c.hotmart_transaction_id}` : `c_${c.id}`
       if (!transacoesVistas.has(key)) {
         transacoesVistas.add(key)
-        totalGasto += c.valor != null ? Number(c.valor) : 0
+        // Usa valor_liquido quando disponível (o que o produtor recebeu)
+        const v = c.valor_liquido ?? c.valor
+        totalGasto += v != null ? Number(v) : 0
       }
     }
 

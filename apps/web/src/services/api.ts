@@ -377,6 +377,7 @@ export interface TrilhaCadencia {
   descricao: string | null
   ativa: boolean
   cor: string
+  tipo_pipeline: string
   produto_entrada: string | null
   produto_destino: string | null
   total_etapas: number

@@ -79,9 +79,16 @@ const MAPA_PRECO_SECUNDARIO = new Set([
 ])
 
 const MAPA_VALOR_LIQUIDO = new Set([
-  'faturamento liquido', 'valor liquido', 'net revenue', 'net value', 'liquido',
+  'faturamento liquido',           // normalizado (sem acento)
+  'faturamento líquido',      // com acento preservado (U+00ED = í)
+  'faturamento_liquido',
+  'valor liquido',
+  'valor líquido',
+  'net revenue', 'net value', 'liquido',
   'valor produtor', 'valor recebido', 'valor que voce recebeu',
   'valor que voce recebeu convertido',
+  'voce recebeu', 'voce recebeu convertido',
+  'você recebeu', 'você recebeu convertido', // você com ê
 ])
 
 const MAPA_MOEDA = new Set([
@@ -124,6 +131,16 @@ function detectarColunas(cabecalhos: string[]): {
   let moedaCol:           string | null = null
   let transactionIdCol:   string | null = null
 
+  // Log da coluna 56 (índice 55) byte-a-byte para diagnóstico de encoding
+  const col56 = cabecalhos[55] ?? null
+  if (col56 !== null) {
+    console.log('[detectarColunas] Coluna 56 raw:', JSON.stringify(col56))
+    console.log('[detectarColunas] Coluna 56 bytes:', Buffer.from(col56).toString('hex'))
+    console.log('[detectarColunas] Coluna 56 normalizada:', JSON.stringify(normalizar(col56)))
+  } else {
+    console.log('[detectarColunas] CSV tem menos de 56 colunas (total:', cabecalhos.length, ')')
+  }
+
   for (const h of cabecalhos) {
     const n = normalizar(h)
     if (!emailCol            && MAPA_EMAIL.has(n))             emailCol            = h
@@ -135,13 +152,21 @@ function detectarColunas(cabecalhos: string[]): {
     if (!dataVendaCol        && MAPA_DATA_VENDA.has(n))        dataVendaCol        = h
     if (!precoColPrimario    && MAPA_PRECO_PRIMARIO.has(n))    precoColPrimario    = h
     if (!precoColSecundario  && MAPA_PRECO_SECUNDARIO.has(n))  precoColSecundario  = h
-    if (!valorLiquidoCol     && MAPA_VALOR_LIQUIDO.has(n))     valorLiquidoCol     = h
+    if (!valorLiquidoCol     && (MAPA_VALOR_LIQUIDO.has(n) || MAPA_VALOR_LIQUIDO.has(h.toLowerCase().trim()))) {
+      valorLiquidoCol = h
+    }
     if (!moedaCol            && MAPA_MOEDA.has(n))             moedaCol            = h
     if (!transactionIdCol    && MAPA_TRANSACTION_ID.has(n))    transactionIdCol    = h
   }
 
   // Prefere "Preço da Oferta" (valor bruto pago) sobre colunas genéricas como "Valor"
   precoCol = precoColPrimario ?? precoColSecundario
+
+  // Fallback por posição: se não detectou valor_liquido por nome, tenta índice 55 (coluna 56)
+  if (!valorLiquidoCol && col56 !== null) {
+    console.log('[detectarColunas] Usando fallback por posição para valor_liquido: coluna 56 =', JSON.stringify(col56))
+    valorLiquidoCol = col56
+  }
 
   return { emailCol, telefoneCol, dddCol, nomeCol, statusCol, produtoNomeCol, dataVendaCol, precoCol, valorLiquidoCol, moedaCol, transactionIdCol }
 }

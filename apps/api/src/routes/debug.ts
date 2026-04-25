@@ -572,6 +572,112 @@ debugRouter.get('/hotmart-paginas', async (req: Request, res: Response) => {
   }
 })
 
+// ── GET /api/debug/compras-duplicadas/:clienteId ──────────────────────────
+// Diagnostica compras duplicadas de um cliente específico.
+// Mostra grupos de compras com o mesmo hotmart_transaction_id ou mesma (produto + data).
+debugRouter.get('/compras-duplicadas/:clienteId', async (req: Request, res: Response) => {
+  try {
+    const { clienteId } = req.params
+
+    const [porTransaction, porProdutoData, resumo] = await Promise.all([
+      // Duplicatas por hotmart_transaction_id
+      query<{
+        hotmart_transaction_id: string
+        quantidade: number
+        produtos: string
+        valor_total: string
+        valor_min: string
+        valor_max: string
+        data_compra: string
+      }>(`
+        SELECT
+          co.hotmart_transaction_id,
+          COUNT(*)::int                           AS quantidade,
+          STRING_AGG(DISTINCT p.nome, ', ')       AS produtos,
+          SUM(co.valor::numeric)::text            AS valor_total,
+          MIN(co.valor::numeric)::text            AS valor_min,
+          MAX(co.valor::numeric)::text            AS valor_max,
+          MIN(co.data_compra::date::text)         AS data_compra
+        FROM compras co
+        JOIN produtos p ON p.id = co.produto_id
+        WHERE co.cliente_id = $1
+          AND co.hotmart_transaction_id IS NOT NULL
+          AND co.status IN ('COMPLETE', 'APPROVED')
+        GROUP BY co.hotmart_transaction_id
+        HAVING COUNT(*) > 1
+        ORDER BY COUNT(*) DESC
+      `, [clienteId]),
+
+      // Duplicatas por produto + data (quando transaction_id é nulo)
+      query<{
+        produto_nome: string
+        data_compra: string
+        quantidade: number
+        valor_total: string
+      }>(`
+        SELECT
+          p.nome                         AS produto_nome,
+          co.data_compra::date::text     AS data_compra,
+          COUNT(*)::int                  AS quantidade,
+          SUM(co.valor::numeric)::text   AS valor_total
+        FROM compras co
+        JOIN produtos p ON p.id = co.produto_id
+        WHERE co.cliente_id = $1
+          AND co.hotmart_transaction_id IS NULL
+          AND co.status IN ('COMPLETE', 'APPROVED')
+        GROUP BY p.nome, co.data_compra::date
+        HAVING COUNT(*) > 1
+        ORDER BY COUNT(*) DESC
+      `, [clienteId]),
+
+      // Resumo geral do cliente
+      queryOne<{
+        total_compras: number
+        total_gasto_bruto: string
+        total_gasto_dedup: string
+      }>(`
+        SELECT
+          COUNT(*)::int                                       AS total_compras,
+          SUM(valor::numeric)::text                          AS total_gasto_bruto,
+          (
+            SELECT SUM(valor::numeric)::text
+            FROM (
+              SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
+                valor
+              FROM compras
+              WHERE cliente_id = $1 AND status IN ('COMPLETE', 'APPROVED')
+              ORDER BY COALESCE(hotmart_transaction_id, id::text), valor::numeric DESC
+            ) sub
+          )                                                  AS total_gasto_dedup
+        FROM compras
+        WHERE cliente_id = $1 AND status IN ('COMPLETE', 'APPROVED')
+      `, [clienteId]),
+    ])
+
+    res.json({
+      cliente_id: clienteId,
+      resumo: {
+        total_compras_no_banco: resumo?.total_compras ?? 0,
+        total_gasto_bruto:      Number(resumo?.total_gasto_bruto ?? 0),
+        total_gasto_correto:    Number(resumo?.total_gasto_dedup ?? 0),
+        inflacao:               resumo
+          ? `${((Number(resumo.total_gasto_bruto) / Number(resumo.total_gasto_dedup || 1)) - 1 * 100).toFixed(0)}%`
+          : '0%',
+      },
+      duplicatas_por_transaction_id: {
+        grupos: porTransaction.length,
+        detalhes: porTransaction,
+      },
+      duplicatas_por_produto_data: {
+        grupos: porProdutoData.length,
+        detalhes: porProdutoData,
+      },
+    })
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
 // ── GET /api/debug/compras-sample ─────────────────────────────────────────
 // Mostra as 10 compras mais recentes com todos os campos de order bump
 debugRouter.get('/compras-sample', async (_req: Request, res: Response) => {

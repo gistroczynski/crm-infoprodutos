@@ -20,6 +20,7 @@ import { relatoriosRouter } from './routes/relatorios'
 import { vendasRouter } from './routes/vendas'
 import { cadenciasRouter } from './routes/cadencias'
 import { reativacaoRouter } from './routes/reativacao'
+import { manutencaoRouter } from './routes/manutencao'
 import { errorHandler } from './middleware/errorHandler'
 import { authMiddleware } from './middleware/auth'
 import { apenasAdmin } from './middleware/perfil'
@@ -136,6 +137,7 @@ app.use('/api/relatorios', apenasAdmin, relatoriosRouter)
 app.use('/api/vendas', vendasRouter)
 app.use('/api/cadencias', cadenciasRouter)
 app.use('/api/reativacao', reativacaoRouter)
+app.use('/api/manutencao', manutencaoRouter)
 
 // ── Error handler ──────────────────────────────────────────────────────────
 app.use(errorHandler)

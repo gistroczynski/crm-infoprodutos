@@ -143,6 +143,7 @@ clientesRouter.get('/:id', async (req: Request, res: Response) => {
       query<{
         id: string; produto_nome: string; produto_tipo: string
         is_order_bump: boolean; valor: number | null; data_compra: string; dias_atras: number
+        hotmart_transaction_id: string | null
       }>(`
         SELECT
           co.id,
@@ -151,7 +152,8 @@ clientesRouter.get('/:id', async (req: Request, res: Response) => {
           COALESCE(co.is_order_bump, false)                    AS is_order_bump,
           co.valor::float                                      AS valor,
           co.data_compra::date::text                           AS data_compra,
-          (CURRENT_DATE - co.data_compra::date)::int           AS dias_atras
+          (CURRENT_DATE - co.data_compra::date)::int           AS dias_atras,
+          co.hotmart_transaction_id
         FROM compras co
         JOIN produtos p ON p.id = co.produto_id
         WHERE co.cliente_id = $1 AND co.status IN ('COMPLETE', 'APPROVED')
@@ -162,7 +164,17 @@ clientesRouter.get('/:id', async (req: Request, res: Response) => {
     if (!clienteRow) return res.status(404).json({ error: 'Cliente não encontrado' })
 
     // ── Resumo ──────────────────────────────────────────────────────────────
-    const totalGasto = comprasRows.reduce((s, c) => s + (c.valor != null ? Number(c.valor) : 0), 0)
+    // Deduplica por hotmart_transaction_id antes de somar para evitar inflar o
+    // total quando a mesma transação gerou múltiplas linhas no banco.
+    const transacoesVistas = new Set<string>()
+    let totalGasto = 0
+    for (const c of comprasRows) {
+      const key = c.hotmart_transaction_id ? `t_${c.hotmart_transaction_id}` : `c_${c.id}`
+      if (!transacoesVistas.has(key)) {
+        transacoesVistas.add(key)
+        totalGasto += c.valor != null ? Number(c.valor) : 0
+      }
+    }
 
     const datasOrdenadas = [...comprasRows].sort(
       (a, b) => new Date(a.data_compra).getTime() - new Date(b.data_compra).getTime()
@@ -192,7 +204,7 @@ clientesRouter.get('/:id', async (req: Request, res: Response) => {
       compras: comprasRows,
       resumo: {
         total_gasto:                Math.round(totalGasto * 100) / 100,
-        quantidade_compras:         comprasRows.length,
+        quantidade_compras:         transacoesVistas.size,
         dias_desde_primeira_compra: diasPrimeira,
         dias_desde_ultima_compra:   diasUltima,
         tem_produto_upsell:         temUpsell,

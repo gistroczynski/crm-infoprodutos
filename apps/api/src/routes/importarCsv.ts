@@ -74,38 +74,48 @@ const MAPA_PRECO = new Set([
   'valor da venda', 'valor do produto', 'amount',
 ])
 
+const MAPA_TRANSACTION_ID = new Set([
+  'cod pedido', 'codigo do pedido', 'codigo pedido', 'transaction',
+  'transaction id', 'transacao', 'cod transacao', 'codigo transacao',
+  'numero do pedido', 'numero pedido', 'order id', 'id transacao',
+  'id da transacao', 'pedido', 'ref pedido',
+])
+
 function detectarColunas(cabecalhos: string[]): {
-  emailCol:       string | null
-  telefoneCol:    string | null
-  dddCol:         string | null
-  nomeCol:        string | null
-  statusCol:      string | null
-  produtoNomeCol: string | null
-  dataVendaCol:   string | null
-  precoCol:       string | null
+  emailCol:          string | null
+  telefoneCol:       string | null
+  dddCol:            string | null
+  nomeCol:           string | null
+  statusCol:         string | null
+  produtoNomeCol:    string | null
+  dataVendaCol:      string | null
+  precoCol:          string | null
+  transactionIdCol:  string | null
 } {
-  let emailCol:       string | null = null
-  let telefoneCol:    string | null = null
-  let dddCol:         string | null = null
-  let nomeCol:        string | null = null
-  let statusCol:      string | null = null
-  let produtoNomeCol: string | null = null
-  let dataVendaCol:   string | null = null
-  let precoCol:       string | null = null
+  let emailCol:         string | null = null
+  let telefoneCol:      string | null = null
+  let dddCol:           string | null = null
+  let nomeCol:          string | null = null
+  let statusCol:        string | null = null
+  let produtoNomeCol:   string | null = null
+  let dataVendaCol:     string | null = null
+  let precoCol:         string | null = null
+  let transactionIdCol: string | null = null
 
   for (const h of cabecalhos) {
     const n = normalizar(h)
-    if (!emailCol       && MAPA_EMAIL.has(n))        emailCol       = h
-    if (!telefoneCol    && MAPA_TELEFONE.has(n))     telefoneCol    = h
-    if (!dddCol         && MAPA_DDD.has(n))          dddCol         = h
-    if (!nomeCol        && MAPA_NOME.has(n))         nomeCol        = h
-    if (!statusCol      && MAPA_STATUS.has(n))       statusCol      = h
-    if (!produtoNomeCol && MAPA_PRODUTO_NOME.has(n)) produtoNomeCol = h
-    if (!dataVendaCol   && MAPA_DATA_VENDA.has(n))   dataVendaCol   = h
-    if (!precoCol       && MAPA_PRECO.has(n))        precoCol       = h
+    if (!emailCol         && MAPA_EMAIL.has(n))          emailCol         = h
+    if (!telefoneCol      && MAPA_TELEFONE.has(n))       telefoneCol      = h
+    if (!dddCol           && MAPA_DDD.has(n))            dddCol           = h
+    if (!nomeCol          && MAPA_NOME.has(n))           nomeCol          = h
+    if (!statusCol        && MAPA_STATUS.has(n))         statusCol        = h
+    if (!produtoNomeCol   && MAPA_PRODUTO_NOME.has(n))   produtoNomeCol   = h
+    if (!dataVendaCol     && MAPA_DATA_VENDA.has(n))     dataVendaCol     = h
+    if (!precoCol         && MAPA_PRECO.has(n))          precoCol         = h
+    if (!transactionIdCol && MAPA_TRANSACTION_ID.has(n)) transactionIdCol = h
   }
 
-  return { emailCol, telefoneCol, dddCol, nomeCol, statusCol, produtoNomeCol, dataVendaCol, precoCol }
+  return { emailCol, telefoneCol, dddCol, nomeCol, statusCol, produtoNomeCol, dataVendaCol, precoCol, transactionIdCol }
 }
 
 // ── Helpers para dados da Hotmart ──────────────────────────────────────────
@@ -267,12 +277,13 @@ importarCsvRouter.post('/preview', upload.single('arquivo'), async (req: Request
       encoding_detectado:  encoding,
       separador_detectado: separador,
       colunas_detectadas:  {
-        email:        cols.emailCol,
-        telefone:     cols.telefoneCol,
-        ddd:          cols.dddCol,
-        status:       cols.statusCol,
-        produto_nome: cols.produtoNomeCol,
-        data_venda:   cols.dataVendaCol,
+        email:          cols.emailCol,
+        telefone:       cols.telefoneCol,
+        ddd:            cols.dddCol,
+        status:         cols.statusCol,
+        produto_nome:   cols.produtoNomeCol,
+        data_venda:     cols.dataVendaCol,
+        transaction_id: cols.transactionIdCol,
       },
       preview:    registros.slice(0, 5),
       cabecalhos,
@@ -442,7 +453,7 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
     const cabecalhos = Object.keys(registros[0])
     const {
       emailCol, telefoneCol, dddCol, nomeCol, statusCol,
-      produtoNomeCol, dataVendaCol, precoCol,
+      produtoNomeCol, dataVendaCol, precoCol, transactionIdCol,
     } = detectarColunas(cabecalhos)
 
     console.log(
@@ -465,10 +476,11 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
       telefone: string
     }
     interface DadosCompra {
-      email:       string
-      produtoNome: string
-      dataVenda:   Date | null
-      preco:       number | null
+      email:         string
+      produtoNome:   string
+      dataVenda:     Date | null
+      preco:         number | null
+      transactionId: string | null
     }
 
     const porEmail    = new Map<string, DadosCliente>()
@@ -503,14 +515,44 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
       if (produtoNomeCol) {
         const produtoNome = linha[produtoNomeCol]?.trim()
         if (produtoNome) {
+          const transactionId = transactionIdCol
+            ? (linha[transactionIdCol]?.trim() || null)
+            : null
           comprasLote.push({
             email,
             produtoNome,
-            dataVenda: dataVendaCol ? parsearData(linha[dataVendaCol] ?? '') : null,
-            preco:     precoCol     ? parsearPreco(linha[precoCol] ?? '')    : null,
+            dataVenda:     dataVendaCol     ? parsearData(linha[dataVendaCol] ?? '')  : null,
+            preco:         precoCol         ? parsearPreco(linha[precoCol] ?? '')     : null,
+            transactionId,
           })
         }
       }
+    }
+
+    // Quando há coluna de transaction_id, deduplica: mantém apenas a linha de maior
+    // valor por transação. Isso evita inserir múltiplos produtos do mesmo pedido como
+    // compras separadas, já que o CSV da Hotmart gera uma linha por produto por pedido.
+    let comprasParaInserir = comprasLote
+    if (transactionIdCol) {
+      const byTransaction = new Map<string, DadosCompra>()
+      const semTransaction: DadosCompra[] = []
+
+      for (const c of comprasLote) {
+        if (c.transactionId) {
+          const existing = byTransaction.get(c.transactionId)
+          if (!existing || (c.preco ?? 0) > (existing.preco ?? 0)) {
+            byTransaction.set(c.transactionId, c)
+          }
+        } else {
+          semTransaction.push(c)
+        }
+      }
+      comprasParaInserir = [...byTransaction.values(), ...semTransaction]
+
+      console.log(
+        `[ImportarCSV/completo] Dedup por transaction_id: ` +
+        `${comprasLote.length} → ${comprasParaInserir.length} compras`
+      )
     }
 
     const emailsUnicos = porEmail.size
@@ -518,7 +560,8 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
       `[ImportarCSV/completo] ${registros.length} linhas → ` +
       `filtrados_status=${filtradosPorStatus} ` +
       `emails_unicos=${emailsUnicos} ` +
-      `compras_coletadas=${comprasLote.length}`
+      `compras_coletadas=${comprasLote.length} ` +
+      `compras_apos_dedup=${comprasParaInserir.length}`
     )
 
     // ── Upsert de clientes ─────────────────────────────────────────────────
@@ -589,9 +632,9 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
     }
 
     // ── Upsert de produtos e inserção de compras ───────────────────────────
-    if (comprasLote.length > 0) {
+    if (comprasParaInserir.length > 0) {
       // Coleta nomes únicos de produtos e faz upsert
-      const nomesUnicos = [...new Set(comprasLote.map(c => c.produtoNome))]
+      const nomesUnicos = [...new Set(comprasParaInserir.map(c => c.produtoNome))]
       const produtoIdPorNome = new Map<string, string>()
 
       for (const nome of nomesUnicos) {
@@ -614,25 +657,34 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
         }
       }
 
-      // Insere compras evitando duplicatas (mesmo cliente + produto + data)
+      // Insere compras evitando duplicatas em reimportações
       const LOTE_COMPRAS = 200
-      for (let i = 0; i < comprasLote.length; i += LOTE_COMPRAS) {
-        const lote = comprasLote.slice(i, i + LOTE_COMPRAS)
+      for (let i = 0; i < comprasParaInserir.length; i += LOTE_COMPRAS) {
+        const lote = comprasParaInserir.slice(i, i + LOTE_COMPRAS)
 
-        await Promise.all(lote.map(async ({ email, produtoNome, dataVenda, preco }) => {
+        await Promise.all(lote.map(async ({ email, produtoNome, dataVenda, preco, transactionId }) => {
           const clienteId = emailParaClienteId.get(email)
           const produtoId = produtoIdPorNome.get(produtoNome)
           if (!clienteId || !produtoId) return
 
           try {
-            // Verifica se a compra já existe para evitar duplicatas em reimportações
-            const existente = await queryOne<{ id: string }>(`
-              SELECT id FROM compras
-              WHERE cliente_id = $1
-                AND produto_id = $2
-                AND ($3::date IS NULL OR data_compra::date = $3::date)
-              LIMIT 1
-            `, [clienteId, produtoId, dataVenda ? dataVenda.toISOString() : null])
+            // Deduplicação: se temos transaction_id, ele é a chave primária da compra.
+            // Sem transaction_id, cai no fallback de cliente + produto + data.
+            let existente: { id: string } | null = null
+            if (transactionId) {
+              existente = await queryOne<{ id: string }>(
+                'SELECT id FROM compras WHERE hotmart_transaction_id = $1 LIMIT 1',
+                [transactionId]
+              )
+            } else {
+              existente = await queryOne<{ id: string }>(`
+                SELECT id FROM compras
+                WHERE cliente_id = $1
+                  AND produto_id = $2
+                  AND ($3::date IS NULL OR data_compra::date = $3::date)
+                LIMIT 1
+              `, [clienteId, produtoId, dataVenda ? dataVenda.toISOString() : null])
+            }
 
             if (existente) {
               resultado.compras_duplicadas++
@@ -640,14 +692,16 @@ importarCsvRouter.post('/completo', upload.single('arquivo'), async (req: Reques
             }
 
             await pool.query(`
-              INSERT INTO compras (cliente_id, produto_id, valor, status, data_compra)
-              VALUES ($1, $2, $3, $4, $5)
+              INSERT INTO compras
+                (cliente_id, produto_id, valor, status, data_compra, hotmart_transaction_id)
+              VALUES ($1, $2, $3, $4, $5, $6)
             `, [
               clienteId,
               produtoId,
               preco,
               'COMPLETE',
               dataVenda ? dataVenda.toISOString() : null,
+              transactionId ?? null,
             ])
 
             resultado.compras_inseridas++
@@ -693,14 +747,15 @@ importarCsvRouter.post('/debug-colunas', upload.single('arquivo'), async (req: R
       colunas_encontradas: cabecalhos,
       primeiras_3_linhas:  registros.slice(0, 3),
       colunas_mapeadas: {
-        email:        cols.emailCol,
-        telefone:     cols.telefoneCol,
-        ddd:          cols.dddCol,
-        nome:         cols.nomeCol,
-        status:       cols.statusCol,
-        produto_nome: cols.produtoNomeCol,
-        data_venda:   cols.dataVendaCol,
-        preco:        cols.precoCol,
+        email:          cols.emailCol,
+        telefone:       cols.telefoneCol,
+        ddd:            cols.dddCol,
+        nome:           cols.nomeCol,
+        status:         cols.statusCol,
+        produto_nome:   cols.produtoNomeCol,
+        data_venda:     cols.dataVendaCol,
+        preco:          cols.precoCol,
+        transaction_id: cols.transactionIdCol,
       },
     })
   } catch (err) {

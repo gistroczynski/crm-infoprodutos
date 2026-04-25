@@ -75,21 +75,26 @@ const MAPA_PRECO_SECUNDARIO = new Set([
   'preco', 'preço', 'valor', 'price', 'valor da venda', 'valor do produto', 'amount',
 ])
 
-// Todos os valores pré-normalizados com NFC para corresponder à saída de normalizar()
-const MAPA_VALOR_LIQUIDO = new Set([
-  normalizar('Faturamento líquido'),             // NFC: 'faturamento líquido' (U+00ED)
-  normalizar('Faturamento liquido'),             // sem acento
-  'faturamento líquido',                   // í explícito como U+00ED
-  'faturamento liquido',
-  normalizar('Valor que você recebeu convertido'),
-  normalizar('Valor que voce recebeu convertido'),
-  normalizar('você recebeu'),
-  normalizar('voce recebeu'),
-  normalizar('Valor líquido'),
-  normalizar('Valor liquido'),
-  'net revenue', 'net value', 'líquido', 'liquido',
-  'valor produtor', 'valor recebido',
-])
+// Ordem importa: find() para no primeiro match.
+// "Faturamento líquido" deve vir antes de "Valor que você recebeu convertido"
+// pois ambas existem no CSV da Hotmart mas só a primeira tem valores preenchidos.
+const MAPA_VALOR_LIQUIDO_PRIORIDADE = [
+  'faturamento líquido',                     // prioridade 1 — U+00ED, NFC
+  'faturamento liquido',                     // prioridade 2 — sem acento
+  'faturamento líquido',               // prioridade 3 — escape explícito
+  'valor líquido',
+  'valor liquido',
+  'net revenue',
+  'net value',
+  'líquido',
+  'liquido',
+  'valor produtor',
+  'valor recebido',
+  'você recebeu',                            // prioridade baixa — coluna existe mas é vazia
+  'voce recebeu',
+  'valor que você recebeu convertido',       // última prioridade — vazia no CSV Hotmart
+  'valor que voce recebeu convertido',
+]
 
 const MAPA_MOEDA = new Set([
   'moeda', 'currency', 'currency code', 'moeda da transacao', 'moeda transacao',
@@ -153,15 +158,21 @@ function detectarColunas(cabecalhos: string[]): {
     if (!dataVendaCol        && MAPA_DATA_VENDA.has(n))        dataVendaCol        = h
     if (!precoColPrimario    && MAPA_PRECO_PRIMARIO.has(n))    precoColPrimario    = h
     if (!precoColSecundario  && MAPA_PRECO_SECUNDARIO.has(n))  precoColSecundario  = h
-    if (!valorLiquidoCol     && (MAPA_VALOR_LIQUIDO.has(n) || MAPA_VALOR_LIQUIDO.has(h.toLowerCase().trim()))) {
-      valorLiquidoCol = h
-    }
+    // valor_liquido detectado por prioridade abaixo — não no loop de headers
     if (!moedaCol            && MAPA_MOEDA.has(n))             moedaCol            = h
     if (!transactionIdCol    && MAPA_TRANSACTION_ID.has(n))    transactionIdCol    = h
   }
 
   // Prefere "Preço da Oferta" (valor bruto pago) sobre colunas genéricas como "Valor"
   precoCol = precoColPrimario ?? precoColSecundario
+
+  // Detecção por prioridade: itera pelo mapa em ordem e para no primeiro header que bater.
+  // Isso garante que "Faturamento líquido" vença mesmo que "Valor que você recebeu" apareça
+  // antes no CSV (a coluna "Valor que você recebeu convertido" existe mas é vazia).
+  for (const alvo of MAPA_VALOR_LIQUIDO_PRIORIDADE) {
+    const found = cabecalhos.find(h => normalizar(h) === alvo || h.toLowerCase().trim() === alvo)
+    if (found) { valorLiquidoCol = found; break }
+  }
 
   // Fallback por posição: se não detectou valor_liquido por nome, tenta índice 55 (coluna 56)
   if (!valorLiquidoCol && col56 !== null) {

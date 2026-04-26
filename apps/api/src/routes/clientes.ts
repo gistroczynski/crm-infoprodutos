@@ -40,9 +40,9 @@ clientesRouter.get('/', async (req: Request, res: Response) => {
       conditions.push(`COALESCE(ls.prioridade, 'baixa') = $${params.length}`)
     }
     if (compras === 'com') {
-      conditions.push(`EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'APPROVED'))`)
+      conditions.push(`EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'COMPLETED', 'APPROVED'))`)
     } else if (compras === 'sem') {
-      conditions.push(`NOT EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'APPROVED'))`)
+      conditions.push(`NOT EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'COMPLETED', 'APPROVED'))`)
     }
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
@@ -57,43 +57,43 @@ clientesRouter.get('/', async (req: Request, res: Response) => {
     }>(`
       SELECT
         c.id, c.nome, c.email, c.telefone_formatado, c.telefone_valido,
-        CASE WHEN COUNT(co.id) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')) = 0
+        CASE WHEN COUNT(co.id) FILTER (WHERE co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')) = 0
              THEN 0
              ELSE COALESCE(ls.score, 0)
         END AS score,
-        CASE WHEN COUNT(co.id) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')) = 0
+        CASE WHEN COUNT(co.id) FILTER (WHERE co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')) = 0
              THEN 'baixa'
              ELSE COALESCE(ls.prioridade, 'baixa')
         END AS prioridade,
-        CASE WHEN COUNT(co.id) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')) = 0
+        CASE WHEN COUNT(co.id) FILTER (WHERE co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')) = 0
              THEN 'sem_compras'
              ELSE COALESCE(sc.status, 'novo')
         END AS status,
 
-        COUNT(co.id)    FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED'))::int   AS total_compras,
-        COALESCE(SUM(co.valor::numeric) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')), 0)::float
+        COUNT(co.id)    FILTER (WHERE co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED'))::int   AS total_compras,
+        COALESCE(SUM(co.valor::numeric) FILTER (WHERE co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')), 0)::float
                                                                       AS total_gasto,
-        MAX(co.data_compra) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED'))    AS ultima_compra,
-        (CURRENT_DATE - MAX(co.data_compra::date) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')))::int
+        MAX(co.data_compra) FILTER (WHERE co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED'))    AS ultima_compra,
+        (CURRENT_DATE - MAX(co.data_compra::date) FILTER (WHERE co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')))::int
                                                                       AS dias_desde_ultima_compra,
 
-        -- Nome do último produto comprado
-        (
-          SELECT p2.nome
-          FROM compras co2
-          JOIN produtos p2 ON p2.id = co2.produto_id
-          WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'APPROVED')
-          ORDER BY co2.data_compra DESC
-          LIMIT 1
-        ) AS ultimo_produto
+        ult.ultimo_produto
 
       FROM clientes c
       LEFT JOIN lead_scores    ls ON ls.cliente_id = c.id
       LEFT JOIN status_clientes sc ON sc.cliente_id = c.id
       LEFT JOIN compras        co ON co.cliente_id  = c.id
+      LEFT JOIN LATERAL (
+        SELECT p2.nome AS ultimo_produto
+        FROM compras co2
+        JOIN produtos p2 ON p2.id = co2.produto_id
+        WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+        ORDER BY co2.data_compra DESC
+        LIMIT 1
+      ) ult ON true
       ${whereClause}
       GROUP BY c.id, c.nome, c.email, c.telefone_formatado, c.telefone_valido,
-               ls.score, ls.prioridade, sc.status
+               ls.score, ls.prioridade, sc.status, ult.ultimo_produto
       ORDER BY COALESCE(ls.score, 0) DESC
       LIMIT $1 OFFSET $2
     `, params)
@@ -114,9 +114,9 @@ clientesRouter.get('/', async (req: Request, res: Response) => {
       countConditions.push(`COALESCE(ls.prioridade, 'baixa') = $${countParams.length}`)
     }
     if (compras === 'com') {
-      countConditions.push(`EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'APPROVED'))`)
+      countConditions.push(`EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'COMPLETED', 'APPROVED'))`)
     } else if (compras === 'sem') {
-      countConditions.push(`NOT EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'APPROVED'))`)
+      countConditions.push(`NOT EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'COMPLETED', 'APPROVED'))`)
     }
     const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : ''
 

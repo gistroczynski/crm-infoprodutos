@@ -520,9 +520,10 @@ export interface ItemFluxoAtivo {
 }
 
 export const fluxoAtivoApi = {
-  listaDia: () =>
-    api.get<{ success: boolean; total: number; itens: ItemFluxoAtivo[] }>(
-      '/api/cadencias/fluxo-ativo'
+  listaDia: (semLimite = false) =>
+    api.get<{ success: boolean; total: number; total_real: number; limite: number; itens: ItemFluxoAtivo[] }>(
+      '/api/cadencias/fluxo-ativo',
+      semLimite ? { params: { sem_limite: 'true' } } : undefined
     ).then(r => r.data),
 
   avancar: (id: string, status_contato: string, observacao?: string) =>
@@ -576,7 +577,7 @@ export const reativacaoApi = {
     api.get<{ success: boolean } & StatsReativacao>('/api/reativacao/stats').then(r => r.data),
 
   listaDia: () =>
-    api.get<{ success: boolean; total: number; itens: ItemReativacao[] }>(
+    api.get<{ success: boolean; total: number; total_real: number; limite: number; itens: ItemReativacao[] }>(
       '/api/reativacao/lista-do-dia'
     ).then(r => r.data),
 

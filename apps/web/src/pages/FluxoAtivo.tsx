@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { fluxoAtivoApi, type ItemFluxoAtivo } from '../services/api'
 import { useToast } from '../hooks/useToast'
 
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 type Resultado = 'enviado' | 'respondeu' | 'sem_resposta' | 'convertido' | 'nao_quer'
@@ -184,8 +185,11 @@ function CardFluxoAtivo({
 type TabEtapa = 'todos' | '1' | '2' | '3+'
 
 export default function FluxoAtivo() {
-  const toast = useToast()
+  const navigate  = useNavigate()
+  const toast     = useToast()
   const [itens,              setItens]              = useState<ItemFluxoAtivo[]>([])
+  const [totalReal,          setTotalReal]          = useState(0)
+  const [limite,             setLimite]             = useState(30)
   const [loading,            setLoading]            = useState(true)
   const [error,              setError]              = useState<string | null>(null)
   const [tabEtapa,           setTabEtapa]           = useState<TabEtapa>('todos')
@@ -195,12 +199,14 @@ export default function FluxoAtivo() {
   const toastRef = useRef(toast)
   toastRef.current = toast
 
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async (semLimite = false) => {
     setLoading(true)
     setError(null)
     try {
-      const data = await fluxoAtivoApi.listaDia()
+      const data = await fluxoAtivoApi.listaDia(semLimite)
       setItens(data.itens)
+      setTotalReal(data.total_real)
+      setLimite(data.limite)
     } catch {
       setError('Erro ao carregar lista do fluxo ativo.')
     } finally {
@@ -208,7 +214,7 @@ export default function FluxoAtivo() {
     }
   }, [])
 
-  useEffect(() => { carregar() }, [carregar])
+  useEffect(() => { carregar(false) }, [carregar])
 
   async function avancar(id: string, resultado: string, obs?: string) {
     await fluxoAtivoApi.avancar(id, resultado, obs)
@@ -225,7 +231,7 @@ export default function FluxoAtivo() {
     try {
       const r = await fluxoAtivoApi.atualizarPrioridades()
       toastRef.current.success(r.mensagem)
-      await carregar()
+      await carregar(false)
     } catch {
       toastRef.current.error('Erro ao atualizar prioridades.')
     } finally {
@@ -267,9 +273,9 @@ export default function FluxoAtivo() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-gray-900">Fluxo Ativo</h1>
-              {!loading && itens.length > 0 && (
+              {!loading && totalReal > 0 && (
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary-600 text-white">
-                  {itens.length} hoje
+                  {Math.min(limite, totalReal)} de {totalReal} hoje
                 </span>
               )}
             </div>
@@ -297,7 +303,7 @@ export default function FluxoAtivo() {
               Atualizar prioridades
             </button>
             <button
-              onClick={carregar}
+              onClick={() => carregar(false)}
               disabled={loading}
               className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
             >
@@ -362,11 +368,26 @@ export default function FluxoAtivo() {
         )}
 
         {!loading && itensFiltrados.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {itensFiltrados.map(item => (
-              <CardFluxoAtivo key={item.id} item={item} onAvancar={avancar} />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {itensFiltrados.map(item => (
+                <CardFluxoAtivo key={item.id} item={item} onAvancar={avancar} />
+              ))}
+            </div>
+            {totalReal > limite && tabEtapa === 'todos' && busca.trim() === '' && (
+              <div className="mt-4 flex items-center justify-center gap-3">
+                <span className="text-sm text-gray-400">
+                  Exibindo {Math.min(limite, totalReal)} de {totalReal} contatos disponíveis hoje
+                </span>
+                <button
+                  onClick={() => carregar(true)}
+                  className="text-sm text-primary-600 font-medium hover:text-primary-700 hover:underline transition-colors"
+                >
+                  Ver todos os {totalReal} →
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

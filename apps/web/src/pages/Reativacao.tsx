@@ -230,8 +230,11 @@ function CardReativacao({
 // ── Página principal ──────────────────────────────────────────────────────
 
 export default function Reativacao() {
-  const toast = useToast()
+  const navigate  = useNavigate()
+  const toast     = useToast()
   const [itens,            setItens]            = useState<ItemReativacao[]>([])
+  const [totalReal,        setTotalReal]        = useState(0)
+  const [limite,           setLimite]           = useState(15)
   const [stats,            setStats]            = useState<StatsReativacao | null>(null)
   const [loading,          setLoading]          = useState(true)
   const [populando,        setPopulando]        = useState(false)
@@ -251,6 +254,8 @@ export default function Reativacao() {
       ])
       setStats(statsData)
       setItens(listaData.itens)
+      setTotalReal(listaData.total_real)
+      setLimite(listaData.limite)
     } catch {
       setError('Erro ao carregar lista de reativação.')
     } finally {
@@ -307,9 +312,9 @@ export default function Reativacao() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-gray-900">Reativação</h1>
-              {!loading && itens.length > 0 && (
+              {!loading && totalReal > 0 && (
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-orange-500 text-white">
-                  {itens.length} hoje
+                  {Math.min(limite, totalReal)} de {totalReal} hoje
                 </span>
               )}
             </div>
@@ -397,11 +402,26 @@ export default function Reativacao() {
         )}
 
         {!loading && itens.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {itens.map(item => (
-              <CardReativacao key={item.id} item={item} onAvancar={avancar} />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {itens.map(item => (
+                <CardReativacao key={item.id} item={item} onAvancar={avancar} />
+              ))}
+            </div>
+            {totalReal > limite && (
+              <div className="mt-4 flex items-center justify-center gap-3">
+                <span className="text-sm text-gray-400">
+                  Exibindo {Math.min(limite, totalReal)} de {totalReal} leads na fila
+                </span>
+                <button
+                  onClick={() => navigate('/clientes')}
+                  className="text-sm text-orange-600 font-medium hover:text-orange-700 hover:underline transition-colors"
+                >
+                  Ver todos os {totalReal} →
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

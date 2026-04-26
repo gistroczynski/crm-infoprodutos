@@ -419,53 +419,17 @@ cadenciasRouter.get('/cliente/:clienteId', async (req: Request, res: Response) =
 })
 
 // ── GET /api/cadencias/fluxo-ativo ───────────────────────────────────────
-// Lista do dia filtrada para pipeline ativo (leads ≤ dias_lead_antigo)
-cadenciasRouter.get('/fluxo-ativo', async (_req: Request, res: Response) => {
+// Lista do dia filtrada para pipeline ativo — respeitando limite_fluxo_ativo
+cadenciasRouter.get('/fluxo-ativo', async (req: Request, res: Response) => {
   try {
-    const rows = await query<{
-      id: string
-      cliente_id: string
-      cliente_nome: string
-      cliente_email: string
-      cliente_telefone: string | null
-      trilha_id: string
-      trilha_nome: string
-      trilha_cor: string
-      produto_entrada: string
-      etapa_atual: number
-      total_etapas: number
-      etapa_id: string
-      nome_etapa: string
-      mensagem_whatsapp: string
-      dias_na_trilha: number
-      status: string
-    }>(`
-      SELECT
-        ct.id,
-        ct.cliente_id,
-        c.nome                           AS cliente_nome,
-        c.email                          AS cliente_email,
-        c.telefone_formatado             AS cliente_telefone,
-        t.id                             AS trilha_id,
-        t.nome                           AS trilha_nome,
-        t.cor                            AS trilha_cor,
-        COALESCE(pe.nome, '')            AS produto_entrada,
-        ct.etapa_atual,
-        (SELECT COUNT(*)::int FROM etapas_cadencia WHERE trilha_id = t.id AND ativa = true)
-                                         AS total_etapas,
-        e.id                             AS etapa_id,
-        e.nome                           AS nome_etapa,
-        e.mensagem_whatsapp,
-        EXTRACT(DAY FROM NOW() - ct.data_entrada)::int AS dias_na_trilha,
-        ct.status
-      FROM clientes_trilha ct
-      JOIN clientes c           ON c.id = ct.cliente_id
-      JOIN trilhas_cadencia t   ON t.id = ct.trilha_id
-                                AND (t.tipo_pipeline = 'ativo' OR t.tipo_pipeline IS NULL)
-      LEFT JOIN produtos pe     ON pe.id = t.produto_entrada_id
-      JOIN etapas_cadencia e    ON e.trilha_id = t.id
-                               AND e.numero_etapa = ct.etapa_atual
-                               AND e.ativa = true
+    const semLimite = req.query.sem_limite === 'true'
+
+    const cfgLimite = await queryOne<{ valor: string }>(
+      `SELECT valor FROM configuracoes WHERE chave = 'limite_fluxo_ativo'`
+    )
+    const limite = Number(cfgLimite?.valor ?? 30)
+
+    const whereFluxo = `
       WHERE ct.status = 'ativo'
         AND ct.data_proxima_etapa <= NOW()
         AND (ct.tipo_pipeline = 'ativo' OR ct.tipo_pipeline IS NULL)
@@ -474,9 +438,67 @@ cadenciasRouter.get('/fluxo-ativo', async (_req: Request, res: Response) => {
           WHERE co2.cliente_id = ct.cliente_id
             AND co2.status IN ('COMPLETE', 'APPROVED')
         )
-      ORDER BY ct.data_proxima_etapa ASC
-    `)
+    `
 
+    const [rows, countRow] = await Promise.all([
+      query<{
+        id: string
+        cliente_id: string
+        cliente_nome: string
+        cliente_email: string
+        cliente_telefone: string | null
+        trilha_id: string
+        trilha_nome: string
+        trilha_cor: string
+        produto_entrada: string
+        etapa_atual: number
+        total_etapas: number
+        etapa_id: string
+        nome_etapa: string
+        mensagem_whatsapp: string
+        dias_na_trilha: number
+        status: string
+      }>(`
+        SELECT
+          ct.id,
+          ct.cliente_id,
+          c.nome                           AS cliente_nome,
+          c.email                          AS cliente_email,
+          c.telefone_formatado             AS cliente_telefone,
+          t.id                             AS trilha_id,
+          t.nome                           AS trilha_nome,
+          t.cor                            AS trilha_cor,
+          COALESCE(pe.nome, '')            AS produto_entrada,
+          ct.etapa_atual,
+          (SELECT COUNT(*)::int FROM etapas_cadencia WHERE trilha_id = t.id AND ativa = true)
+                                           AS total_etapas,
+          e.id                             AS etapa_id,
+          e.nome                           AS nome_etapa,
+          e.mensagem_whatsapp,
+          EXTRACT(DAY FROM NOW() - ct.data_entrada)::int AS dias_na_trilha,
+          ct.status
+        FROM clientes_trilha ct
+        JOIN clientes c           ON c.id = ct.cliente_id
+        JOIN trilhas_cadencia t   ON t.id = ct.trilha_id
+                                  AND (t.tipo_pipeline = 'ativo' OR t.tipo_pipeline IS NULL)
+        LEFT JOIN produtos pe     ON pe.id = t.produto_entrada_id
+        JOIN etapas_cadencia e    ON e.trilha_id = t.id
+                                 AND e.numero_etapa = ct.etapa_atual
+                                 AND e.ativa = true
+        ${whereFluxo}
+        ORDER BY ct.data_proxima_etapa ASC
+        ${semLimite ? '' : `LIMIT ${limite}`}
+      `),
+      queryOne<{ total: string }>(`
+        SELECT COUNT(DISTINCT ct.id)::text AS total
+        FROM clientes_trilha ct
+        JOIN trilhas_cadencia t ON t.id = ct.trilha_id
+                                AND (t.tipo_pipeline = 'ativo' OR t.tipo_pipeline IS NULL)
+        ${whereFluxo}
+      `),
+    ])
+
+    const totalReal = Number(countRow?.total ?? 0)
     const itens = rows.map(r => {
       const msg  = r.mensagem_whatsapp.replace(/\{nome\}/g, r.cliente_nome.split(' ')[0])
       const link = r.cliente_telefone
@@ -485,7 +507,7 @@ cadenciasRouter.get('/fluxo-ativo', async (_req: Request, res: Response) => {
       return { ...r, mensagem_do_dia: msg, link_whatsapp: link }
     })
 
-    res.json({ success: true, total: itens.length, itens })
+    res.json({ success: true, total: itens.length, total_real: totalReal, limite, itens })
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) })
   }

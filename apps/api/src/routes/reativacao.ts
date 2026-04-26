@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { z } from 'zod'
-import { pool } from '../db'
+import { pool, queryOne } from '../db'
 import {
   popularFilaReativacao,
   buscarListaReativacaoDia,
@@ -36,8 +36,23 @@ reativacaoRouter.get('/stats', async (_req: Request, res: Response) => {
 
 reativacaoRouter.get('/lista-do-dia', async (_req: Request, res: Response) => {
   try {
-    const itens = await buscarListaReativacaoDia()
-    res.json({ success: true, total: itens.length, itens })
+    const [itens, totalRealRow, cfgLimite] = await Promise.all([
+      buscarListaReativacaoDia(),
+      queryOne<{ total: number }>(`
+        SELECT (
+          (SELECT COUNT(*)::int FROM clientes_trilha ct
+           JOIN trilhas_cadencia t ON t.id = ct.trilha_id AND t.tipo_pipeline = 'reativacao'
+           WHERE ct.status = 'ativo') +
+          (SELECT COUNT(*)::int FROM fila_reativacao WHERE status = 'aguardando')
+        ) AS total
+      `),
+      queryOne<{ valor: string }>(
+        `SELECT valor FROM configuracoes WHERE chave = 'limite_reativacao_diaria'`
+      ),
+    ])
+    const totalReal = totalRealRow?.total ?? 0
+    const limite = Number(cfgLimite?.valor ?? 15)
+    res.json({ success: true, total: itens.length, total_real: totalReal, limite, itens })
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) })
   }

@@ -40,8 +40,8 @@ function useReativacaoCount() {
   const [count, setCount] = useState(0)
   useEffect(() => {
     const fetch = () => {
-      api.get<{ aguardando: number }>('/api/reativacao/stats')
-        .then(r => setCount(r.data.aguardando))
+      api.get<{ limite_diario: number }>('/api/reativacao/stats')
+        .then(r => setCount(r.data.limite_diario))
         .catch(() => {})
     }
     fetch()

@@ -317,6 +317,12 @@ export interface ResumoVendas {
   receita_total: number
   ticket_medio: number
   por_dia: { data: string; quantidade: number; receita: number }[]
+  comparacao: {
+    total_vendas_anterior: number
+    receita_anterior: number
+    variacao_vendas: number | null
+    variacao_receita: number | null
+  } | null
 }
 
 export interface VendasListResponse {
@@ -587,6 +593,7 @@ export const vendasApi = {
     inicio?: string; fim?: string
     page?: number; limit?: number
     produto_id?: string; busca?: string
+    tipo?: string
   }) =>
     api.get<VendasListResponse>('/api/vendas', { params }).then(r => r.data),
 

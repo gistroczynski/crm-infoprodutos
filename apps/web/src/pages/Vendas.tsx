@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import {
   vendasApi, produtosApi,
-  type VendaItem, type VendasHojeResponse,
+  type VendaItem, type VendasHojeResponse, type ResumoVendas,
 } from '../services/api'
 import type { Produto } from '@crm/shared'
 import { useToast } from '../hooks/useToast'
@@ -34,7 +34,15 @@ function fmtEixoX(data: string): string {
     .trim()
 }
 
-type Periodo = 'hoje' | 'semana' | 'mes' | 'personalizado'
+type Periodo = 'hoje' | 'semana' | 'mes' | 'ano' | 'personalizado'
+
+const CARD_LABELS: Record<Periodo, { vendas: string; receita: string; ticket: string; compare: string | null }> = {
+  hoje:          { vendas: 'Vendas hoje',       receita: 'Receita hoje',       ticket: 'Ticket médio hoje', compare: 'vs ontem' },
+  semana:        { vendas: 'Vendas na semana',  receita: 'Receita na semana',  ticket: 'Ticket médio',      compare: 'vs semana passada' },
+  mes:           { vendas: 'Vendas no mês',     receita: 'Receita no mês',     ticket: 'Ticket médio',      compare: 'vs mês passado' },
+  ano:           { vendas: 'Vendas no ano',     receita: 'Receita no ano',     ticket: 'Ticket médio',      compare: 'vs ano passado' },
+  personalizado: { vendas: 'Vendas no período', receita: 'Receita no período', ticket: 'Ticket médio',      compare: null },
+}
 
 function calcRange(periodo: Periodo): { inicio: string; fim: string } {
   const brtStr = new Date().toLocaleDateString('pt-BR', {
@@ -42,17 +50,16 @@ function calcRange(periodo: Periodo): { inicio: string; fim: string } {
   }).split('/')
   const [d, mo, y] = brtStr.map(Number)
   const hojeStr = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-  if (periodo === 'hoje') {
-    return { inicio: hojeStr, fim: hojeStr }
-  }
+  if (periodo === 'hoje') return { inicio: hojeStr, fim: hojeStr }
   if (periodo === 'semana') {
     const ini = new Date(y, mo - 1, d - 6)
-    const iniStr = `${ini.getFullYear()}-${String(ini.getMonth() + 1).padStart(2, '0')}-${String(ini.getDate()).padStart(2, '0')}`
-    return { inicio: iniStr, fim: hojeStr }
+    return {
+      inicio: `${ini.getFullYear()}-${String(ini.getMonth() + 1).padStart(2, '0')}-${String(ini.getDate()).padStart(2, '0')}`,
+      fim:    hojeStr,
+    }
   }
-  if (periodo === 'mes') {
-    return { inicio: `${y}-${String(mo).padStart(2, '0')}-01`, fim: hojeStr }
-  }
+  if (periodo === 'mes') return { inicio: `${y}-${String(mo).padStart(2, '0')}-01`, fim: hojeStr }
+  if (periodo === 'ano') return { inicio: `${y}-01-01`, fim: hojeStr }
   return { inicio: hojeStr, fim: hojeStr }
 }
 
@@ -131,12 +138,13 @@ export default function Vendas() {
   const [page,       setPage]       = useState(1)
 
   // Dados
-  const [vendas,      setVendas]      = useState<VendaItem[] | null>(null)
-  const [totalVendas, setTotalVendas] = useState(0)
-  const [totalPages,  setTotalPages]  = useState(1)
-  const [porDia,      setPorDia]      = useState<{ data: string; quantidade: number; receita: number }[]>([])
-  const [hoje,        setHoje]        = useState<VendasHojeResponse | null>(null)
-  const [produtos,    setProdutos]    = useState<Produto[]>([])
+  const [vendas,        setVendas]        = useState<VendaItem[] | null>(null)
+  const [totalVendas,   setTotalVendas]   = useState(0)
+  const [totalPages,    setTotalPages]    = useState(1)
+  const [porDia,        setPorDia]        = useState<{ data: string; quantidade: number; receita: number }[]>([])
+  const [resumoPeriodo, setResumoPeriodo] = useState<ResumoVendas | null>(null)
+  const [hoje,          setHoje]          = useState<VendasHojeResponse | null>(null)
+  const [produtos,      setProdutos]      = useState<Produto[]>([])
   const [loading,       setLoading]       = useState(true)
   const [syncing,           setSyncing]           = useState(false)
   const [syncingFull,       setSyncingFull]       = useState(false)
@@ -193,11 +201,13 @@ export default function Vendas() {
         limit:      50,
         produto_id: produtoId || undefined,
         busca:      busca    || undefined,
+        tipo:       periodo,
       })
       setVendas(data.vendas)
       setTotalVendas(data.total)
       setTotalPages(data.total_pages)
       setPorDia(data.resumo.por_dia)
+      setResumoPeriodo(data.resumo)
       erroJaMostradoRef.current = false
       setAvisoConexao(false)
     } catch {
@@ -210,7 +220,7 @@ export default function Vendas() {
     } finally {
       setLoading(false)
     }
-  }, [dataInicio, dataFim, page, produtoId, busca]) // sem toast — usa toastRef
+  }, [dataInicio, dataFim, page, produtoId, busca, periodo]) // sem toast — usa toastRef
 
   // ── Montar ────────────────────────────────────────────────────────────────
 
@@ -251,6 +261,7 @@ export default function Vendas() {
         inicio: dataInicio, fim: dataFim, page, limit: 50,
         produto_id: produtoId || undefined,
         busca:      busca    || undefined,
+        tipo:       periodo,
       }),
       vendasApi.hoje().then(setHoje).catch(() => {}),
     ])
@@ -258,6 +269,7 @@ export default function Vendas() {
     setTotalVendas(dados.total)
     setTotalPages(dados.total_pages)
     setPorDia(dados.resumo.por_dia)
+    setResumoPeriodo(dados.resumo)
     erroJaMostradoRef.current = false
     setAvisoConexao(false)
     return dados.total - totalAntes
@@ -342,7 +354,6 @@ export default function Vendas() {
 
   // Máximo para barra de progresso do ranking
   const topProdMax = Math.max(...(hoje?.top_produtos.map(t => t.quantidade) ?? [1]), 1)
-  const vendasPeriodo = totalVendas
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -368,7 +379,7 @@ export default function Vendas() {
         <div className="flex items-center gap-3">
           {/* Seletor de período */}
           <div className="flex items-center bg-gray-100 rounded-lg p-0.5 text-sm">
-            {(['hoje', 'semana', 'mes'] as Periodo[]).map(p => (
+            {(['hoje', 'semana', 'mes', 'ano'] as Periodo[]).map(p => (
               <button
                 key={p}
                 onClick={() => selecionarPeriodo(p)}
@@ -379,7 +390,7 @@ export default function Vendas() {
                     : 'text-gray-500 hover:text-gray-700',
                 ].join(' ')}
               >
-                {p === 'hoje' ? 'Hoje' : p === 'semana' ? 'Esta semana' : 'Este mês'}
+                {p === 'hoje' ? 'Hoje' : p === 'semana' ? 'Esta semana' : p === 'mes' ? 'Este mês' : 'Este ano'}
               </button>
             ))}
           </div>
@@ -496,60 +507,88 @@ export default function Vendas() {
         </div>
       )}
 
-      {/* ── SEÇÃO 1: Cards do dia (sempre Hoje) ────────────────────────────── */}
+      {/* ── SEÇÃO 1: Cards do período ───────────────────────────────────────── */}
       <div className="grid grid-cols-4 gap-4">
 
-        {/* Vendas hoje */}
+        {/* Vendas do período */}
         <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">Vendas hoje</p>
-          {hoje === null ? (
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">
+            {CARD_LABELS[periodo].vendas}
+          </p>
+          {loading && resumoPeriodo === null ? (
             <Skeleton className="h-8 w-16 mb-1" />
           ) : (
-            <p className="text-3xl font-bold text-gray-900">{hoje.total_hoje}</p>
+            <p className="text-3xl font-bold text-gray-900">{resumoPeriodo?.total_vendas ?? 0}</p>
           )}
           <div className="mt-1">
-            <Variacao pct={hoje?.comparacao_ontem.variacao_vendas_pct ?? null} />
-            <span className="text-[10px] text-gray-400 ml-1">vs ontem ({hoje?.comparacao_ontem.total_ontem ?? '—'})</span>
+            {CARD_LABELS[periodo].compare && resumoPeriodo?.comparacao ? (
+              <>
+                <Variacao pct={resumoPeriodo.comparacao.variacao_vendas} />
+                <span className="text-[10px] text-gray-400 ml-1">
+                  {CARD_LABELS[periodo].compare} ({resumoPeriodo.comparacao.total_vendas_anterior})
+                </span>
+              </>
+            ) : (
+              <span className="text-[10px] text-gray-400">—</span>
+            )}
           </div>
         </div>
 
-        {/* Receita hoje */}
+        {/* Receita do período */}
         <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">Receita hoje</p>
-          {hoje === null ? (
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">
+            {CARD_LABELS[periodo].receita}
+          </p>
+          {loading && resumoPeriodo === null ? (
             <Skeleton className="h-8 w-28 mb-1" />
           ) : (
-            <p className="text-2xl font-bold text-gray-900">{brl(hoje.receita_hoje)}</p>
+            <p className="text-2xl font-bold text-gray-900">{brl(resumoPeriodo?.receita_total ?? 0)}</p>
           )}
           <div className="mt-1">
-            <Variacao pct={hoje?.comparacao_ontem.variacao_receita_pct ?? null} />
-            <span className="text-[10px] text-gray-400 ml-1">vs ontem</span>
+            {CARD_LABELS[periodo].compare && resumoPeriodo?.comparacao ? (
+              <>
+                <Variacao pct={resumoPeriodo.comparacao.variacao_receita} />
+                <span className="text-[10px] text-gray-400 ml-1">{CARD_LABELS[periodo].compare}</span>
+              </>
+            ) : (
+              <span className="text-[10px] text-gray-400">—</span>
+            )}
           </div>
         </div>
 
-        {/* Ticket médio hoje */}
+        {/* Ticket médio */}
         <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">Ticket médio hoje</p>
-          {hoje === null ? (
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">
+            {CARD_LABELS[periodo].ticket}
+          </p>
+          {loading && resumoPeriodo === null ? (
             <Skeleton className="h-8 w-24 mb-1" />
           ) : (
-            <p className="text-2xl font-bold text-gray-900">{brl(hoje.ticket_hoje)}</p>
+            <p className="text-2xl font-bold text-gray-900">{brl(resumoPeriodo?.ticket_medio ?? 0)}</p>
           )}
           <p className="text-[10px] text-gray-400 mt-1">por venda</p>
         </div>
 
-        {/* Vendas no período */}
+        {/* Vendas no período (4º card — label dinâmico) */}
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">
-            Vendas no período
+            {CARD_LABELS[periodo].vendas}
           </p>
-          {loading && vendas === null ? (
+          {loading && resumoPeriodo === null ? (
             <Skeleton className="h-8 w-16 mb-1" />
           ) : (
-            <p className="text-3xl font-bold text-gray-900">{vendasPeriodo}</p>
+            <p className="text-3xl font-bold text-gray-900">{resumoPeriodo?.total_vendas ?? 0}</p>
           )}
           <p className="text-[10px] text-gray-400 mt-1">
-            {periodo === 'hoje' ? 'hoje' : periodo === 'semana' ? 'últimos 7 dias' : periodo === 'mes' ? 'este mês' : `${dataInicio} → ${dataFim}`}
+            {periodo === 'hoje'
+              ? 'hoje'
+              : periodo === 'semana'
+              ? 'últimos 7 dias'
+              : periodo === 'mes'
+              ? 'este mês'
+              : periodo === 'ano'
+              ? 'este ano'
+              : `${dataInicio} → ${dataFim}`}
           </p>
         </div>
       </div>

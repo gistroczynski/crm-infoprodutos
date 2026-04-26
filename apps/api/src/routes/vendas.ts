@@ -63,7 +63,24 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
     const { where: listWhere, params: listBaseParams } = buildWhere(inicio, fim, produtoId, busca, 3)
     const listParams: unknown[] = [limit, offset, ...listBaseParams]
 
-    const [vendas, stats, porDia] = await Promise.all([
+    const tipo = (req.query.tipo as string) || 'personalizado'
+
+    // Comparison period SQL expressions (using $1=inicio, $2=fim from baseParams)
+    let antInicioSql: string
+    let antFimSql:   string
+    if (tipo === 'mes') {
+      antInicioSql = `$1::date - INTERVAL '1 month'`
+      antFimSql    = `$2::date - INTERVAL '1 month'`
+    } else if (tipo === 'ano') {
+      antInicioSql = `$1::date - INTERVAL '1 year'`
+      antFimSql    = `$2::date - INTERVAL '1 year'`
+    } else {
+      // hoje, semana, personalizado: same duration shifted back
+      antFimSql    = `$1::date - 1`
+      antInicioSql = `$1::date - ($2::date - $1::date) - 1`
+    }
+
+    const [vendas, stats, porDia, comparacaoRow] = await Promise.all([
 
       query<{
         id: string; transaction_id: string; cliente_id: string
@@ -111,10 +128,26 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
         GROUP BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date
         ORDER BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date
       `, baseParams),
+
+      queryOne<{ total: string; receita: string }>(`
+        SELECT
+          COUNT(*)::text                                                                   AS total,
+          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
+        ${FROM_JOIN}
+        WHERE co.status IN ('COMPLETE', 'APPROVED')
+          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= ${antInicioSql}
+          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= ${antFimSql}
+      `, baseParams),
     ])
 
     const total       = Number(stats?.total   ?? 0)
     const total_pages = Math.ceil(total / limit) || 1
+
+    const receitaAtual = Number(stats?.receita ?? 0)
+    const totalAnt     = Number(comparacaoRow?.total   ?? 0)
+    const receitaAnt   = Number(comparacaoRow?.receita ?? 0)
+    const varVendas    = totalAnt    === 0 ? null : Math.round(((total        - totalAnt)   / totalAnt)    * 100)
+    const varReceita   = receitaAnt  === 0 ? null : Math.round(((receitaAtual - receitaAnt) / receitaAnt)  * 100)
 
     res.json({
       vendas,
@@ -124,13 +157,19 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
       total_pages,
       resumo: {
         total_vendas:  total,
-        receita_total: Number(stats?.receita ?? 0),
+        receita_total: receitaAtual,
         ticket_medio:  Number(stats?.ticket  ?? 0),
         por_dia: porDia.map(d => ({
           data:       d.data,
           quantidade: Number(d.quantidade),
           receita:    Number(d.receita),
         })),
+        comparacao: tipo === 'personalizado' ? null : {
+          total_vendas_anterior: totalAnt,
+          receita_anterior:      receitaAnt,
+          variacao_vendas:       varVendas,
+          variacao_receita:      varReceita,
+        },
       },
     })
   } catch (err) {

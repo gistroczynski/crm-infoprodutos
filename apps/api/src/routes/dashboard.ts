@@ -135,7 +135,7 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
   try {
     const { inicio, fim } = parseDateRange(req)
 
-    const [periodo, faturamentoUsd, porProduto, clientes] = await Promise.all([
+    const [periodo, faturamentoUsd, porProduto, clientes, clientesPeriodoRow] = await Promise.all([
 
       // Faturamento BRL líquido — deduplicado por transaction_id
       queryOne<{ faturamento: number; total_compras: number; ticket_medio: number }>(`
@@ -187,8 +187,8 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
           AND co.status IN (${statusFaturamento(inicio)})
           AND COALESCE(co.valor_liquido, co.valor) IS NOT NULL
           AND (co.moeda = 'BRL' OR co.moeda IS NULL)
-          AND co.data_compra::date >= $1::date
-          AND co.data_compra::date <= $2::date
+          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
         GROUP BY p.id, p.nome, p.tipo
         ORDER BY receita DESC
         LIMIT 20
@@ -206,6 +206,15 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
             ) THEN c.id END)::int AS clientes_com_principal
         FROM clientes c
       `),
+
+      // Clientes únicos com compra NO PERÍODO (filtrado por data em horário de Brasília)
+      queryOne<{ clientes_periodo: number }>(`
+        SELECT COUNT(DISTINCT cliente_id)::int AS clientes_periodo
+        FROM compras
+        WHERE (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+          AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+          AND status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+      `, [inicio, fim]),
     ])
 
     const totalC      = clientes?.total_clientes      ?? 0
@@ -219,6 +228,7 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
       faturamento_usd:        faturamentoUsd?.faturamento ?? 0,
       ticket_medio:           periodo?.ticket_medio  ?? 0,
       total_clientes:         totalC,
+      clientes_periodo:       clientesPeriodoRow?.clientes_periodo ?? 0,
       clientes_com_principal: comPrincipal,
       taxa_ascensao:          taxaAscensao,
       total_compras:          periodo?.total_compras ?? 0,
@@ -244,8 +254,8 @@ dashboardRouter.get('/funil', async (req: Request, res: Response) => {
       FROM compras co
       WHERE co.status IN (${statusFaturamento(inicio)})
         AND co.is_order_bump = true
-        AND co.data_compra::date >= $1::date
-        AND co.data_compra::date <= $2::date
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
     `, [inicio, fim])
 
     const [entrada, order_bump_row, upsell] = await Promise.all([

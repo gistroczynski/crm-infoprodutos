@@ -29,6 +29,8 @@ import { executarSync } from './jobs/sync'
 import { executarGeracaoLista } from './jobs/lista'
 import { executarListaReativacao, executarPopularFilaReativacao } from './jobs/cadencia'
 
+process.env.TZ = 'America/Sao_Paulo'
+
 dotenv.config()
 
 // ── Validação de variáveis de ambiente obrigatórias ────────────────────────

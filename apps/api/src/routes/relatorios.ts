@@ -45,13 +45,13 @@ relatoriosRouter.get('/ascensao', async (req: Request, res: Response) => {
           SELECT co2.cliente_id
           FROM compras co2
           JOIN produtos p2 ON p2.id = co2.produto_id AND p2.tipo = 'principal'
-          WHERE co2.status IN ('COMPLETE', 'APPROVED')
-            AND co2.data_compra::date >= $1::date
-            AND co2.data_compra::date <= $2::date
+          WHERE co2.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+            AND (co2.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+            AND (co2.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
         ) co_up ON co_up.cliente_id = co_all.cliente_id
-        WHERE co_all.status IN ('COMPLETE', 'APPROVED')
-          AND co_all.data_compra::date >= $1::date
-          AND co_all.data_compra::date <= $2::date
+        WHERE co_all.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+          AND (co_all.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+          AND (co_all.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
       `, [inicio, fim]),
 
       // Tempo médio de ascensão: data primeira entrada → data compra upsell
@@ -65,10 +65,10 @@ relatoriosRouter.get('/ascensao', async (req: Request, res: Response) => {
           JOIN produtos p_up ON p_up.id = co_up.produto_id AND p_up.tipo = 'principal'
           JOIN compras co_en ON co_en.cliente_id = co_up.cliente_id
           JOIN produtos p_en ON p_en.id = co_en.produto_id AND p_en.tipo = 'entrada'
-          WHERE co_up.status IN ('COMPLETE', 'APPROVED')
-            AND co_en.status IN ('COMPLETE', 'APPROVED')
-            AND co_up.data_compra::date >= $1::date
-            AND co_up.data_compra::date <= $2::date
+          WHERE co_up.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+            AND co_en.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+            AND (co_up.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+            AND (co_up.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
           GROUP BY co_up.cliente_id
           HAVING MIN(co_up.data_compra) >= MIN(co_en.data_compra)
         ) sub
@@ -77,15 +77,15 @@ relatoriosRouter.get('/ascensao', async (req: Request, res: Response) => {
       // Ascensões agrupadas por semana
       query<{ semana: string; quantidade: number }>(`
         SELECT
-          TO_CHAR(DATE_TRUNC('week', co.data_compra::date), 'DD/MM') AS semana,
+          TO_CHAR(DATE_TRUNC('week', (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date), 'DD/MM') AS semana,
           COUNT(DISTINCT co.cliente_id)::int                         AS quantidade
         FROM compras co
         JOIN produtos p ON p.id = co.produto_id AND p.tipo = 'principal'
-        WHERE co.status IN ('COMPLETE', 'APPROVED')
-          AND co.data_compra::date >= $1::date
-          AND co.data_compra::date <= $2::date
-        GROUP BY DATE_TRUNC('week', co.data_compra::date)
-        ORDER BY DATE_TRUNC('week', co.data_compra::date)
+        WHERE co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+        GROUP BY DATE_TRUNC('week', (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date)
+        ORDER BY DATE_TRUNC('week', (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date)
       `, [inicio, fim]),
     ])
 
@@ -120,8 +120,8 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
           FROM compras co
           WHERE co.status IN ('COMPLETE', 'APPROVED')
             AND co.produto_id = ANY($1::uuid[])
-            AND co.data_compra::date >= $2::date
-            AND co.data_compra::date <= $3::date
+            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
+            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
         `, [entradaIds, inicio, fim])
       : queryOne<{ total_clientes: number; receita: number }>(`
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
@@ -130,8 +130,8 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
           JOIN produtos p ON p.id = co.produto_id
           WHERE co.status IN ('COMPLETE', 'APPROVED')
             AND COALESCE(p.tipo, 'entrada') = 'entrada'
-            AND co.data_compra::date >= $1::date
-            AND co.data_compra::date <= $2::date
+            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
         `, [inicio, fim]))
 
     // Order Bump
@@ -141,8 +141,8 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
       FROM compras co
       WHERE co.status IN ('COMPLETE', 'APPROVED')
         AND co.is_order_bump = true
-        AND co.data_compra::date >= $1::date
-        AND co.data_compra::date <= $2::date
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
     `, [inicio, fim])
 
     // Upsell (produto principal configurado)
@@ -153,8 +153,8 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
           FROM compras co
           WHERE co.status IN ('COMPLETE', 'APPROVED')
             AND co.produto_id = ANY($1::uuid[])
-            AND co.data_compra::date >= $2::date
-            AND co.data_compra::date <= $3::date
+            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
+            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
         `, [principalIds, inicio, fim])
       : queryOne<{ total_clientes: number; receita: number }>(`
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
@@ -163,8 +163,8 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
           JOIN produtos p ON p.id = co.produto_id
           WHERE co.status IN ('COMPLETE', 'APPROVED')
             AND p.tipo = 'principal'
-            AND co.data_compra::date >= $1::date
-            AND co.data_compra::date <= $2::date
+            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
         `, [inicio, fim]))
 
     const entrada = entradaRow ?? { total_clientes: 0, receita: 0 }
@@ -275,8 +275,8 @@ relatoriosRouter.get('/produtos', async (req: Request, res: Response) => {
       JOIN compras co ON co.produto_id = p.id
         AND co.status IN ('COMPLETE', 'APPROVED')
         AND COALESCE(co.valor_liquido, co.valor) IS NOT NULL
-        AND co.data_compra::date >= $1::date
-        AND co.data_compra::date <= $2::date
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
       GROUP BY p.id, p.nome, p.tipo
       ORDER BY receita DESC
     `, [inicio, fim])
@@ -321,7 +321,7 @@ relatoriosRouter.get('/cadencias', async (req: Request, res: Response) => {
         ), 0)::int                                                            AS taxa_conversao,
         COALESCE(AVG(
           CASE WHEN ct.status = 'convertido'
-               THEN (CURRENT_DATE - ct.data_entrada::date)
+               THEN ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date - ct.data_entrada::date)
           END
         )::int, 0)                                                            AS tempo_medio_dias
       FROM trilhas_cadencia t

@@ -11,27 +11,35 @@ function brl(v: number) {
 }
 
 function hoje() {
-  return new Date().toISOString().slice(0, 10)
+  return new Date().toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).split('/').reverse().join('-')
 }
 
 function mesAtual(): { inicio: string; fim: string } {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const ld = new Date(y, now.getMonth() + 1, 0).getDate()
-  return { inicio: `${y}-${m}-01`, fim: `${y}-${m}-${String(ld).padStart(2, '0')}` }
+  const parts = new Date().toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).split('/')
+  const y = Number(parts[2])
+  const m = Number(parts[1])
+  const ld = new Date(y, m, 0).getDate()
+  const ms = String(m).padStart(2, '0')
+  return { inicio: `${y}-${ms}-01`, fim: `${y}-${ms}-${String(ld).padStart(2, '0')}` }
 }
 
 function fmt(iso: string) {
-  return new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })
+  return new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo', day: '2-digit', month: 'short', year: 'numeric',
+  })
 }
 
 function fmtPeriodo(inicio: string, fim: string) {
+  const tz = { timeZone: 'America/Sao_Paulo' } as const
   if (inicio === fim) return fmt(inicio)
   const i = new Date(inicio + 'T12:00:00')
   const f = new Date(fim    + 'T12:00:00')
   if (i.getMonth() === f.getMonth() && i.getFullYear() === f.getFullYear()) {
-    return i.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+    return i.toLocaleDateString('pt-BR', { ...tz, month: 'long', year: 'numeric' })
   }
   if (i.getFullYear() === f.getFullYear() && i.getMonth() === 0 && f.getMonth() === 11) {
     return String(i.getFullYear())

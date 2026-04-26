@@ -14,8 +14,8 @@ function buildWhere(
 ) {
   const conds: string[] = [
     `co.status IN ('COMPLETE', 'APPROVED')`,
-    `co.data_compra >= $${startAt}::date`,
-    `co.data_compra <  ($${startAt + 1}::date + INTERVAL '1 day')`,
+    `(co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $${startAt}::date`,
+    `(co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $${startAt + 1}::date`,
   ]
   const params: unknown[] = [inicio, fim]
 
@@ -45,10 +45,14 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
     const limit  = Math.min(200, Math.max(1, Number(req.query.limit ?? 50)))
     const offset = (page - 1) * limit
 
-    const hoje   = new Date()
-    const iniMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().split('T')[0]
-    const inicio = (req.query.inicio    as string) || iniMes
-    const fim    = (req.query.fim       as string) || hoje.toISOString().split('T')[0]
+    const agora   = new Date()
+    const hojeStr = agora.toLocaleDateString('pt-BR', {
+      timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).split('/').reverse().join('-')
+    const [y, m] = hojeStr.split('-')
+    const iniMes  = `${y}-${m}-01`
+    const inicio  = (req.query.inicio as string) || iniMes
+    const fim     = (req.query.fim    as string) || hojeStr
     const produtoId = req.query.produto_id as string | undefined
     const busca     = req.query.busca      as string | undefined
 
@@ -244,10 +248,14 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
 
 vendasRouter.get('/resumo-diario', async (req: Request, res: Response) => {
   try {
-    const hoje   = new Date()
-    const iniMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().split('T')[0]
-    const inicio = (req.query.inicio as string) || iniMes
-    const fim    = (req.query.fim    as string) || hoje.toISOString().split('T')[0]
+    const agora   = new Date()
+    const hojeStr = agora.toLocaleDateString('pt-BR', {
+      timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).split('/').reverse().join('-')
+    const [ry, rm] = hojeStr.split('-')
+    const iniMes  = `${ry}-${rm}-01`
+    const inicio  = (req.query.inicio as string) || iniMes
+    const fim     = (req.query.fim    as string) || hojeStr
 
     const rows = await query<{
       data: string; produto_nome: string; quantidade: string; receita: string
@@ -259,8 +267,8 @@ vendasRouter.get('/resumo-diario', async (req: Request, res: Response) => {
         COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
       ${FROM_JOIN}
       WHERE co.status IN ('COMPLETE', 'APPROVED')
-        AND co.data_compra >= $1::date
-        AND co.data_compra <  ($2::date + INTERVAL '1 day')
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
       GROUP BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date, p.nome
       ORDER BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date, p.nome
     `, [inicio, fim])

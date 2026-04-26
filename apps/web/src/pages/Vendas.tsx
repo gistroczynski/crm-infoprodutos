@@ -19,10 +19,11 @@ const brl = (v: number) =>
 
 function fmtDataHora(iso: string, diasAtras?: number): string {
   const d = new Date(iso)
-  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const tz = { timeZone: 'America/Sao_Paulo' } as const
+  const hora = d.toLocaleTimeString('pt-BR', { ...tz, hour: '2-digit', minute: '2-digit' })
   if (diasAtras === 0) return `Hoje ${hora}`
   if (diasAtras === 1) return `Ontem ${hora}`
-  return `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} ${hora}`
+  return `${d.toLocaleDateString('pt-BR', { ...tz, day: '2-digit', month: 'short' })} ${hora}`
 }
 
 function fmtEixoX(data: string): string {
@@ -36,22 +37,23 @@ function fmtEixoX(data: string): string {
 type Periodo = 'hoje' | 'semana' | 'mes' | 'personalizado'
 
 function calcRange(periodo: Periodo): { inicio: string; fim: string } {
-  const hoje = new Date()
-  const fmt  = (d: Date) => d.toISOString().split('T')[0]
+  const brtStr = new Date().toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).split('/')
+  const [d, mo, y] = brtStr.map(Number)
+  const hojeStr = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
   if (periodo === 'hoje') {
-    return { inicio: fmt(hoje), fim: fmt(hoje) }
+    return { inicio: hojeStr, fim: hojeStr }
   }
   if (periodo === 'semana') {
-    const ini = new Date(hoje)
-    ini.setDate(hoje.getDate() - 6)
-    return { inicio: fmt(ini), fim: fmt(hoje) }
+    const ini = new Date(y, mo - 1, d - 6)
+    const iniStr = `${ini.getFullYear()}-${String(ini.getMonth() + 1).padStart(2, '0')}-${String(ini.getDate()).padStart(2, '0')}`
+    return { inicio: iniStr, fim: hojeStr }
   }
   if (periodo === 'mes') {
-    const y = hoje.getFullYear()
-    const m = String(hoje.getMonth() + 1).padStart(2, '0')
-    return { inicio: `${y}-${m}-01`, fim: fmt(hoje) }
+    return { inicio: `${y}-${String(mo).padStart(2, '0')}-01`, fim: hojeStr }
   }
-  return { inicio: fmt(hoje), fim: fmt(hoje) }
+  return { inicio: hojeStr, fim: hojeStr }
 }
 
 // ── Badge tipo produto ───────────────────────────────────────────────────────

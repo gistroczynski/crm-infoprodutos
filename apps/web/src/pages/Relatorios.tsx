@@ -21,25 +21,35 @@ function brl(v: number) {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
-function hoje() { return new Date().toISOString().slice(0, 10) }
+function hoje() {
+  return new Date().toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).split('/').reverse().join('-')
+}
 
 function mesAtual(): DateRange {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const ld = new Date(y, now.getMonth() + 1, 0).getDate()
-  return { inicio: `${y}-${m}-01`, fim: `${y}-${m}-${String(ld).padStart(2, '0')}` }
+  const parts = new Date().toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).split('/')
+  const y = Number(parts[2])
+  const m = Number(parts[1])
+  const ld = new Date(y, m, 0).getDate()
+  const ms = String(m).padStart(2, '0')
+  return { inicio: `${y}-${ms}-01`, fim: `${y}-${ms}-${String(ld).padStart(2, '0')}` }
 }
 
 function semanaAtual(): DateRange {
-  const now = new Date()
-  const dow = now.getDay() === 0 ? 6 : now.getDay() - 1 // Monday = 0
-  const mon = new Date(now); mon.setDate(now.getDate() - dow)
-  const sun = new Date(mon); sun.setDate(mon.getDate() + 6)
-  return {
-    inicio: mon.toISOString().slice(0, 10),
-    fim:    sun.toISOString().slice(0, 10),
-  }
+  const brtStr = new Date().toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).split('/')
+  const [d, mo, y] = brtStr.map(Number)
+  const now = new Date(y, mo - 1, d)
+  const dow = now.getDay() === 0 ? 6 : now.getDay() - 1
+  const mon = new Date(y, mo - 1, d - dow)
+  const sun = new Date(y, mo - 1, d - dow + 6)
+  const fmt = (dt: Date) =>
+    `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+  return { inicio: fmt(mon), fim: fmt(sun) }
 }
 
 function anoAtual(): DateRange {
@@ -48,12 +58,13 @@ function anoAtual(): DateRange {
 }
 
 function fmtPeriodo(inicio: string, fim: string) {
-  const fmt = (s: string) => new Date(s + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+  const tz = { timeZone: 'America/Sao_Paulo' } as const
+  const fmt = (s: string) => new Date(s + 'T12:00:00').toLocaleDateString('pt-BR', { ...tz, day: '2-digit', month: 'short' })
   if (inicio === fim) return fmt(inicio)
   const i = new Date(inicio + 'T12:00:00')
   const f = new Date(fim    + 'T12:00:00')
   if (i.getMonth() === f.getMonth() && i.getFullYear() === f.getFullYear())
-    return i.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+    return i.toLocaleDateString('pt-BR', { ...tz, month: 'long', year: 'numeric' })
   if (i.getMonth() === 0 && f.getMonth() === 11 && i.getFullYear() === f.getFullYear())
     return String(i.getFullYear())
   return `${fmt(inicio)} – ${fmt(fim)}`
@@ -225,7 +236,7 @@ function AbaVisaoGeral({ range }: { range: DateRange }) {
             )}
             <p className="text-xs text-gray-400">{resumo?.total_compras ?? 0} compras</p>
           </div>
-          <MetricCard label="Clientes no Período" value={(resumo?.total_clientes ?? 0).toLocaleString('pt-BR')}
+          <MetricCard label="Clientes no Período" value={(resumo?.clientes_periodo ?? 0).toLocaleString('pt-BR')}
             color="text-primary-600"
             sub="com ao menos 1 compra"
             icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}

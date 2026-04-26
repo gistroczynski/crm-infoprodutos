@@ -112,6 +112,7 @@ export interface DashboardResumo {
   faturamento_usd: number
   ticket_medio: number
   total_clientes: number
+  clientes_periodo: number
   clientes_com_principal: number
   taxa_ascensao: number
   total_compras: number

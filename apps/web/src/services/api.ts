@@ -52,8 +52,17 @@ export interface ClientesListResponse {
 }
 
 export interface ClienteCompra {
-  id: string; produto_nome: string; produto_tipo: string
-  is_order_bump: boolean; valor: number | null; data_compra: string; dias_atras: number
+  id: string
+  produto_nome: string
+  produto_tipo: string
+  is_order_bump: boolean
+  valor: number | null
+  data_compra: string
+  primeira_compra: string
+  dias_atras: number
+  num_compras: number
+  total_pago: number
+  is_assinatura: boolean
 }
 
 export interface ClientePerfil {

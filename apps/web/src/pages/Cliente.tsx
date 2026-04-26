@@ -454,10 +454,36 @@ export default function Cliente() {
               <div className="absolute left-4 top-4 bottom-4 w-px bg-gray-100" />
               <ol className="space-y-5 relative">
                 {perfil.compras.map((c, i) => {
+                  if (c.is_assinatura) {
+                    return (
+                      <li key={i} className="flex items-start gap-4">
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 z-10 text-base font-bold bg-indigo-100 text-indigo-600">
+                          ↻
+                        </div>
+                        <div className="flex-1 min-w-0 pt-1">
+                          <div className="flex items-start justify-between gap-2 flex-wrap">
+                            <p className="font-medium text-gray-900 text-sm truncate max-w-[260px]" title={c.produto_nome}>
+                              {c.produto_nome}
+                            </p>
+                            <span className="font-semibold text-gray-800 text-sm shrink-0">{brl(c.total_pago)}</span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700">
+                              Assinatura ativa
+                            </span>
+                            <span className="text-xs text-gray-500">{c.num_compras} cobranças</span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">
+                            Desde {formatarData(c.primeira_compra)} · Última cobrança: {formatarData(c.data_compra)}
+                          </p>
+                        </div>
+                      </li>
+                    )
+                  }
+
                   const tipo = c.is_order_bump ? 'order_bump' : c.produto_tipo
                   return (
                     <li key={i} className="flex items-start gap-4">
-                      {/* Ícone colorido por tipo */}
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 z-10 text-sm font-bold ${tipoIconBg[tipo] ?? 'bg-gray-100 text-gray-500'}`}>
                         {(tipoLabel[tipo] ?? tipo)[0].toUpperCase()}
                       </div>
@@ -472,11 +498,6 @@ export default function Cliente() {
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${tipoIconBg[tipo] ?? 'bg-gray-100 text-gray-500'}`}>
                             {tipoLabel[tipo] ?? tipo}
                           </span>
-                          {c.is_order_bump && (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700 border border-amber-200">
-                              Order Bump
-                            </span>
-                          )}
                           <span className="text-xs text-gray-400">{formatarData(c.data_compra)}</span>
                           <span className="text-xs text-gray-400">· {c.dias_atras}d atrás</span>
                         </div>

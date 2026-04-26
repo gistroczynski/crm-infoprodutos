@@ -142,49 +142,41 @@ clientesRouter.get('/:id', async (req: Request, res: Response) => {
 
       query<{
         id: string; produto_nome: string; produto_tipo: string
-        is_order_bump: boolean; valor: number | null; valor_liquido: number | null
-        data_compra: string; dias_atras: number
-        hotmart_transaction_id: string | null
+        is_order_bump: boolean; valor: number | null
+        data_compra: string; primeira_compra: string; dias_atras: number
+        num_compras: number; total_pago: number; is_assinatura: boolean
       }>(`
         SELECT
-          co.id,
-          p.nome                                                AS produto_nome,
-          COALESCE(p.tipo, 'entrada')                          AS produto_tipo,
-          COALESCE(co.is_order_bump, false)                    AS is_order_bump,
-          co.valor::float                                      AS valor,
-          co.valor_liquido::float                              AS valor_liquido,
-          co.data_compra::date::text                           AS data_compra,
-          (CURRENT_DATE - co.data_compra::date)::int           AS dias_atras,
-          co.hotmart_transaction_id
+          co.produto_id                                                                       AS id,
+          p.nome                                                                              AS produto_nome,
+          COALESCE(p.tipo, 'entrada')                                                        AS produto_tipo,
+          bool_or(COALESCE(co.is_order_bump, false))                                         AS is_order_bump,
+          COUNT(*)::int                                                                       AS num_compras,
+          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float             AS total_pago,
+          (ARRAY_AGG(COALESCE(co.valor_liquido, co.valor)::float
+            ORDER BY co.data_compra DESC))[1]                                                AS valor,
+          (MIN(co.data_compra) AT TIME ZONE 'America/Sao_Paulo')::date::text                AS primeira_compra,
+          (MAX(co.data_compra) AT TIME ZONE 'America/Sao_Paulo')::date::text                AS data_compra,
+          (COUNT(*) > 1)                                                                      AS is_assinatura,
+          (CURRENT_DATE - (MAX(co.data_compra) AT TIME ZONE 'America/Sao_Paulo')::date)::int AS dias_atras
         FROM compras co
         JOIN produtos p ON p.id = co.produto_id
         WHERE co.cliente_id = $1 AND co.status IN ('COMPLETE', 'APPROVED')
-        ORDER BY co.data_compra DESC
+        GROUP BY co.produto_id, p.nome, p.tipo
+        ORDER BY MAX(co.data_compra) DESC
       `, [id]),
     ])
 
     if (!clienteRow) return res.status(404).json({ error: 'Cliente não encontrado' })
 
     // ── Resumo ──────────────────────────────────────────────────────────────
-    // Deduplica por hotmart_transaction_id antes de somar para evitar inflar o
-    // total quando a mesma transação gerou múltiplas linhas no banco.
-    const transacoesVistas = new Set<string>()
-    let totalGasto = 0
-    for (const c of comprasRows) {
-      const key = c.hotmart_transaction_id ? `t_${c.hotmart_transaction_id}` : `c_${c.id}`
-      if (!transacoesVistas.has(key)) {
-        transacoesVistas.add(key)
-        // Usa valor_liquido quando disponível (o que o produtor recebeu)
-        const v = c.valor_liquido ?? c.valor
-        totalGasto += v != null ? Number(v) : 0
-      }
-    }
+    // Cada linha já é única por produto (GROUP BY). total_pago acumula todas as cobranças.
+    const totalGasto         = comprasRows.reduce((s, c) => s + (c.total_pago ?? 0), 0)
+    const quantidadeCompras  = comprasRows.reduce((s, c) => s + (c.num_compras ?? 1), 0)
 
-    const datasOrdenadas = [...comprasRows].sort(
-      (a, b) => new Date(a.data_compra).getTime() - new Date(b.data_compra).getTime()
-    )
-    const diasPrimeira = datasOrdenadas.length
-      ? Math.round((Date.now() - new Date(datasOrdenadas[0].data_compra).getTime()) / 86_400_000)
+    const todasPrimeiras = comprasRows.map(c => new Date(c.primeira_compra + 'T12:00:00').getTime())
+    const diasPrimeira = todasPrimeiras.length
+      ? Math.round((Date.now() - Math.min(...todasPrimeiras)) / 86_400_000)
       : null
     const diasUltima = comprasRows.length ? comprasRows[0].dias_atras : null
 
@@ -208,7 +200,7 @@ clientesRouter.get('/:id', async (req: Request, res: Response) => {
       compras: comprasRows,
       resumo: {
         total_gasto:                Math.round(totalGasto * 100) / 100,
-        quantidade_compras:         transacoesVistas.size,
+        quantidade_compras:         quantidadeCompras,
         dias_desde_primeira_compra: diasPrimeira,
         dias_desde_ultima_compra:   diasUltima,
         tem_produto_upsell:         temUpsell,

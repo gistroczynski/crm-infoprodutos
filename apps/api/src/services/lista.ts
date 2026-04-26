@@ -1,5 +1,5 @@
 import { query, queryOne, pool } from '../db'
-import { calcularScores, salvarScores, buscarCandidatos } from './scoring'
+import { calcularScores, salvarScores, buscarCandidatos, zerarScoresClientesSemCompras } from './scoring'
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -97,9 +97,10 @@ export async function gerarListaDiaria(): Promise<{
   const hoje = new Date().toISOString().slice(0, 10)
   console.log(`[Lista] Iniciando geração para ${hoje}...`)
 
-  // 1. Calcula e salva scores
+  // 1. Calcula e salva scores; zera clientes sem compras
   const scores = await calcularScores()
   await salvarScores(scores)
+  await zerarScoresClientesSemCompras()
 
   // 2. Apaga lista existente para hoje
   await pool.query(`DELETE FROM lista_diaria WHERE data = $1`, [hoje])

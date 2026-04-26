@@ -21,6 +21,7 @@ clientesRouter.get('/', async (req: Request, res: Response) => {
     const search    = req.query.search    as string | undefined
     const status    = req.query.status    as string | undefined
     const prioridade = req.query.prioridade as string | undefined
+    const compras   = req.query.compras   as string | undefined  // 'com' | 'sem'
 
     // Build WHERE conditions — params start at $3 (limit=$1, offset=$2)
     const conditions: string[] = []
@@ -38,6 +39,11 @@ clientesRouter.get('/', async (req: Request, res: Response) => {
       params.push(prioridade)
       conditions.push(`COALESCE(ls.prioridade, 'baixa') = $${params.length}`)
     }
+    if (compras === 'com') {
+      conditions.push(`EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'APPROVED'))`)
+    } else if (compras === 'sem') {
+      conditions.push(`NOT EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'APPROVED'))`)
+    }
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
@@ -51,9 +57,18 @@ clientesRouter.get('/', async (req: Request, res: Response) => {
     }>(`
       SELECT
         c.id, c.nome, c.email, c.telefone_formatado, c.telefone_valido,
-        COALESCE(ls.score, 0)            AS score,
-        COALESCE(ls.prioridade, 'baixa') AS prioridade,
-        COALESCE(sc.status, 'novo')      AS status,
+        CASE WHEN COUNT(co.id) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')) = 0
+             THEN 0
+             ELSE COALESCE(ls.score, 0)
+        END AS score,
+        CASE WHEN COUNT(co.id) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')) = 0
+             THEN 'baixa'
+             ELSE COALESCE(ls.prioridade, 'baixa')
+        END AS prioridade,
+        CASE WHEN COUNT(co.id) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')) = 0
+             THEN 'sem_compras'
+             ELSE COALESCE(sc.status, 'novo')
+        END AS status,
 
         COUNT(co.id)    FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED'))::int   AS total_compras,
         COALESCE(SUM(co.valor::numeric) FILTER (WHERE co.status IN ('COMPLETE', 'APPROVED')), 0)::float
@@ -97,6 +112,11 @@ clientesRouter.get('/', async (req: Request, res: Response) => {
     if (prioridade) {
       countParams.push(prioridade)
       countConditions.push(`COALESCE(ls.prioridade, 'baixa') = $${countParams.length}`)
+    }
+    if (compras === 'com') {
+      countConditions.push(`EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'APPROVED'))`)
+    } else if (compras === 'sem') {
+      countConditions.push(`NOT EXISTS (SELECT 1 FROM compras co2 WHERE co2.cliente_id = c.id AND co2.status IN ('COMPLETE', 'APPROVED'))`)
     }
     const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : ''
 

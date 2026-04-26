@@ -1,4 +1,4 @@
-import { query, queryOne } from '../db'
+import { query, queryOne, pool } from '../db'
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -276,4 +276,35 @@ export async function salvarScores(scores: ScoreResult[]): Promise<void> {
   }
 
   console.log(`[Scoring] ${scores.length} scores salvos`)
+}
+
+// ── Zera scores de clientes sem compras ────────────────────────────────────
+
+export async function zerarScoresClientesSemCompras(): Promise<void> {
+  const res = await pool.query(`
+    UPDATE lead_scores
+    SET score = 0, prioridade = 'baixa', updated_at = NOW()
+    WHERE cliente_id NOT IN (
+      SELECT DISTINCT cliente_id FROM compras
+      WHERE status IN ('COMPLETE', 'APPROVED')
+    )
+    AND score > 0
+  `)
+
+  await pool.query(`
+    INSERT INTO status_clientes (cliente_id, status, updated_at)
+    SELECT c.id, 'sem_compras', NOW()
+    FROM clientes c
+    WHERE NOT EXISTS (
+      SELECT 1 FROM compras
+      WHERE cliente_id = c.id AND status IN ('COMPLETE', 'APPROVED')
+    )
+    ON CONFLICT (cliente_id) DO UPDATE SET
+      status     = 'sem_compras',
+      updated_at = NOW()
+  `)
+
+  if ((res.rowCount ?? 0) > 0) {
+    console.log(`[Scoring] ${res.rowCount} clientes sem compras tiveram score zerado`)
+  }
 }

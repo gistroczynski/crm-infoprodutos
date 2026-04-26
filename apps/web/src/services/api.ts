@@ -84,7 +84,7 @@ export interface ClientePerfil {
 }
 
 export const clientesApi = {
-  list: (params?: { page?: number; limit?: number; search?: string; status?: string; prioridade?: string }) =>
+  list: (params?: { page?: number; limit?: number; search?: string; status?: string; prioridade?: string; compras?: string }) =>
     api.get<ClientesListResponse>('/api/clientes', { params }).then(r => r.data),
 
   getPerfil: (id: string) =>

@@ -469,6 +469,11 @@ cadenciasRouter.get('/fluxo-ativo', async (_req: Request, res: Response) => {
       WHERE ct.status = 'ativo'
         AND ct.data_proxima_etapa <= NOW()
         AND (ct.tipo_pipeline = 'ativo' OR ct.tipo_pipeline IS NULL)
+        AND EXISTS (
+          SELECT 1 FROM compras co2
+          WHERE co2.cliente_id = ct.cliente_id
+            AND co2.status IN ('COMPLETE', 'APPROVED')
+        )
       ORDER BY ct.data_proxima_etapa ASC
     `)
 

@@ -25,16 +25,17 @@ const prioridadeColors: Record<string, string> = {
 }
 
 const statusColors: Record<string, string> = {
-  novo:      'bg-blue-100 text-blue-700',
-  nutricao:  'bg-purple-100 text-purple-700',
-  pronto:    'bg-emerald-100 text-emerald-700',
-  ascendido: 'bg-indigo-100 text-indigo-700',
-  inativo:   'bg-gray-100 text-gray-500',
+  novo:        'bg-blue-100 text-blue-700',
+  nutricao:    'bg-purple-100 text-purple-700',
+  pronto:      'bg-emerald-100 text-emerald-700',
+  ascendido:   'bg-indigo-100 text-indigo-700',
+  inativo:     'bg-gray-100 text-gray-500',
+  sem_compras: 'bg-orange-100 text-orange-600',
 }
 
 const statusLabels: Record<string, string> = {
   novo: 'Novo', nutricao: 'Nutrição', pronto: 'Pronto',
-  ascendido: 'Ascendido', inativo: 'Inativo',
+  ascendido: 'Ascendido', inativo: 'Inativo', sem_compras: 'Sem compras',
 }
 
 // ── Score bar ──────────────────────────────────────────────────────────────
@@ -84,7 +85,7 @@ function SkeletonRow() {
 
 // ── Clientes ───────────────────────────────────────────────────────────────
 
-const STATUS_OPTIONS   = ['', 'novo', 'nutricao', 'pronto', 'ascendido', 'inativo']
+const STATUS_OPTIONS   = ['', 'novo', 'nutricao', 'pronto', 'ascendido', 'inativo', 'sem_compras']
 const PRIORIDADE_OPTIONS = ['', 'alta', 'media', 'baixa']
 
 export default function Clientes() {
@@ -96,6 +97,7 @@ export default function Clientes() {
   const [search,     setSearch]     = useState('')
   const [status,     setStatus]     = useState('')
   const [prioridade, setPrioridade] = useState('')
+  const [compras,    setCompras]    = useState('')
   const [loading,    setLoading]    = useState(true)
   const limit = 20
 
@@ -103,7 +105,7 @@ export default function Clientes() {
     let active = true
     setLoading(true)
     clientesApi
-      .list({ page, limit, search: search || undefined, status: status || undefined, prioridade: prioridade || undefined })
+      .list({ page, limit, search: search || undefined, status: status || undefined, prioridade: prioridade || undefined, compras: compras || undefined })
       .then(res => {
         if (!active) return
         setClientes(res.clientes)
@@ -112,7 +114,7 @@ export default function Clientes() {
       })
       .finally(() => active && setLoading(false))
     return () => { active = false }
-  }, [page, search, status, prioridade])
+  }, [page, search, status, prioridade, compras])
 
   function handleFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1) }
@@ -169,6 +171,17 @@ export default function Clientes() {
               <option key={o} value={o}>{o.charAt(0).toUpperCase() + o.slice(1)}</option>
             ))}
           </select>
+
+          {/* Compras */}
+          <select
+            value={compras}
+            onChange={e => handleFilter(setCompras)(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white text-gray-700"
+          >
+            <option value="">Com e sem compras</option>
+            <option value="com">Com compras</option>
+            <option value="sem">Sem compras</option>
+          </select>
         </div>
       </div>
 
@@ -217,9 +230,11 @@ export default function Clientes() {
 
                     {/* Último produto */}
                     <td className="px-4 py-3.5 text-gray-600 max-w-[200px] hidden md:table-cell">
-                      <p className="truncate text-sm" title={c.ultimo_produto ?? ''}>
-                        {c.ultimo_produto ?? <span className="text-gray-300">—</span>}
-                      </p>
+                      {c.ultimo_produto ? (
+                        <p className="truncate text-sm" title={c.ultimo_produto}>{c.ultimo_produto}</p>
+                      ) : (
+                        <span className="text-xs text-orange-500 italic">Sem compras registradas</span>
+                      )}
                     </td>
 
                     {/* Comprou há */}

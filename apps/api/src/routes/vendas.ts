@@ -4,8 +4,10 @@ import { query, queryOne } from '../db'
 export const vendasRouter = Router()
 
 // ── Constantes de status e deduplicação ───────────────────────────────────
-const STATUS_OK = `co.status IN ('COMPLETE', 'COMPLETED')`
-const TX_KEY    = `COALESCE(co.hotmart_transaction_id, co.id::text)`
+const STATUS_OK       = `co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')`
+const TX_KEY          = `COALESCE(co.hotmart_transaction_id, co.id::text)`
+// Prioriza COMPLETE > COMPLETED > APPROVED para manter o registro mais definitivo
+const STATUS_PRIORITY = `CASE co.status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END`
 
 // ── Helpers de timezone ────────────────────────────────────────────────────
 const TZ        = `'America/Sao_Paulo'`
@@ -114,7 +116,7 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
             (${HOJE_BRT} - (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date)::int AS dias_atras
           ${FROM_JOIN}
           ${listWhere}
-          ORDER BY ${TX_KEY}, co.data_compra DESC
+          ORDER BY ${TX_KEY}, ${STATUS_PRIORITY}
         ) t
         ORDER BY t.data_compra DESC
         LIMIT $1 OFFSET $2
@@ -133,7 +135,7 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
             co.valor, co.valor_liquido
           ${FROM_JOIN}
           ${baseWhere}
-          ORDER BY ${TX_KEY}, co.data_compra DESC
+          ORDER BY ${TX_KEY}, ${STATUS_PRIORITY}
         ) v
       `, baseParams),
 
@@ -149,7 +151,7 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
             (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date AS data_brt
           ${FROM_JOIN}
           ${baseWhere}
-          ORDER BY ${TX_KEY}, co.data_compra DESC
+          ORDER BY ${TX_KEY}, ${STATUS_PRIORITY}
         ) v
         GROUP BY v.data_brt
         ORDER BY v.data_brt
@@ -167,7 +169,7 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
           WHERE ${STATUS_OK}
             AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= ${antInicioSql}
             AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= ${antFimSql}
-          ORDER BY ${TX_KEY}, co.data_compra DESC
+          ORDER BY ${TX_KEY}, ${STATUS_PRIORITY}
         ) v
       `, baseParams),
     ])
@@ -239,7 +241,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           ${FROM_JOIN}
           WHERE ${STATUS_OK}
             AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
-          ORDER BY ${TX_KEY}, co.data_compra DESC
+          ORDER BY ${TX_KEY}, ${STATUS_PRIORITY}
         ) t
         ORDER BY t.data_compra DESC
       `),
@@ -258,7 +260,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           ${FROM_JOIN}
           WHERE ${STATUS_OK}
             AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
-          ORDER BY ${TX_KEY}, co.data_compra DESC
+          ORDER BY ${TX_KEY}, ${STATUS_PRIORITY}
         ) v
       `),
 
@@ -273,7 +275,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           ${FROM_JOIN}
           WHERE ${STATUS_OK}
             AND ${DATA_BRT('co.data_compra')} = ${ONTEM_BRT}
-          ORDER BY ${TX_KEY}, co.data_compra DESC
+          ORDER BY ${TX_KEY}, ${STATUS_PRIORITY}
         ) v
       `),
 
@@ -289,7 +291,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           ${FROM_JOIN}
           WHERE ${STATUS_OK}
             AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
-          ORDER BY ${TX_KEY}, co.data_compra DESC
+          ORDER BY ${TX_KEY}, ${STATUS_PRIORITY}
         ) v
         GROUP BY v.produto_nome
         ORDER BY COUNT(*) DESC

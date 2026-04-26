@@ -75,7 +75,7 @@ async function buscarEtapaFunil(
           AND co.produto_id = ANY($1::uuid[])
           AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
           AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
-        ORDER BY COALESCE(co.hotmart_transaction_id, co.id::text), co.id
+        ORDER BY COALESCE(co.hotmart_transaction_id, co.id::text), CASE co.status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
       ) t
     `, [ids, inicio, fim])
     return row ?? { total_clientes: 0, receita: 0 }
@@ -152,7 +152,7 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
             AND COALESCE(valor_liquido, valor) IS NOT NULL
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
-          ORDER BY COALESCE(hotmart_transaction_id, id::text), id
+          ORDER BY COALESCE(hotmart_transaction_id, id::text), CASE status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
         ) v
       `, [inicio, fim]),
 
@@ -170,11 +170,11 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
             AND COALESCE(valor_liquido, valor) IS NOT NULL
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
-          ORDER BY COALESCE(hotmart_transaction_id, id::text), id
+          ORDER BY COALESCE(hotmart_transaction_id, id::text), CASE status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
         ) v
       `, [inicio, fim]),
 
-      // Top produtos no período — usa valor líquido
+      // Top produtos no período — usa valor líquido, deduplicado por transaction_id
       query<{ produto_id: string; nome: string; tipo: string; total_vendas: number; receita: number }>(`
         SELECT
           p.id                                                             AS produto_id,
@@ -183,12 +183,18 @@ dashboardRouter.get('/resumo', async (req: Request, res: Response) => {
           COUNT(co.id)::int                                                AS total_vendas,
           COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
         FROM produtos p
-        JOIN compras co ON co.produto_id = p.id
-          AND co.status IN (${statusFaturamento(inicio)})
-          AND COALESCE(co.valor_liquido, co.valor) IS NOT NULL
-          AND (co.moeda = 'BRL' OR co.moeda IS NULL)
-          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
-          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+        JOIN (
+          SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
+            id, produto_id, valor_liquido, valor
+          FROM compras
+          WHERE status IN (${statusFaturamento(inicio)})
+            AND COALESCE(valor_liquido, valor) IS NOT NULL
+            AND (moeda = 'BRL' OR moeda IS NULL)
+            AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+            AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+          ORDER BY COALESCE(hotmart_transaction_id, id::text),
+                   CASE status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
+        ) co ON co.produto_id = p.id
         GROUP BY p.id, p.nome, p.tipo
         ORDER BY receita DESC
         LIMIT 20
@@ -345,7 +351,7 @@ dashboardRouter.get('/diagnostico-faturamento', async (req: Request, res: Respon
           WHERE status IN (${statusFaturamento(inicio)}) AND valor IS NOT NULL
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
             AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
-          ORDER BY COALESCE(hotmart_transaction_id, id::text), id
+          ORDER BY COALESCE(hotmart_transaction_id, id::text), CASE status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
         ) v
       `, [inicio, fim]),
 

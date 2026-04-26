@@ -117,32 +117,50 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
       ? queryOne<{ total_clientes: number; receita: number }>(`
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
                  COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
-          FROM compras co
-          WHERE co.status IN ('COMPLETE', 'APPROVED')
-            AND co.produto_id = ANY($1::uuid[])
-            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
-            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
+          FROM (
+            SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
+              cliente_id, valor_liquido, valor
+            FROM compras
+            WHERE status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+              AND produto_id = ANY($1::uuid[])
+              AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
+              AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
+            ORDER BY COALESCE(hotmart_transaction_id, id::text),
+                     CASE status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
+          ) co
         `, [entradaIds, inicio, fim])
       : queryOne<{ total_clientes: number; receita: number }>(`
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
                  COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
-          FROM compras co
-          JOIN produtos p ON p.id = co.produto_id
-          WHERE co.status IN ('COMPLETE', 'APPROVED')
-            AND COALESCE(p.tipo, 'entrada') = 'entrada'
-            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
-            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+          FROM (
+            SELECT DISTINCT ON (COALESCE(c2.hotmart_transaction_id, c2.id::text))
+              c2.cliente_id, c2.valor_liquido, c2.valor
+            FROM compras c2
+            JOIN produtos p ON p.id = c2.produto_id
+            WHERE c2.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+              AND COALESCE(p.tipo, 'entrada') = 'entrada'
+              AND (c2.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+              AND (c2.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+            ORDER BY COALESCE(c2.hotmart_transaction_id, c2.id::text),
+                     CASE c2.status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
+          ) co
         `, [inicio, fim]))
 
     // Order Bump
     const obRow = await queryOne<{ total_clientes: number; receita: number }>(`
       SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
              COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
-      FROM compras co
-      WHERE co.status IN ('COMPLETE', 'APPROVED')
-        AND co.is_order_bump = true
-        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
-        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+      FROM (
+        SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
+          cliente_id, valor_liquido, valor
+        FROM compras
+        WHERE status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+          AND is_order_bump = true
+          AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+          AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+        ORDER BY COALESCE(hotmart_transaction_id, id::text),
+                 CASE status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
+      ) co
     `, [inicio, fim])
 
     // Upsell (produto principal configurado)
@@ -150,21 +168,33 @@ relatoriosRouter.get('/funil', async (req: Request, res: Response) => {
       ? queryOne<{ total_clientes: number; receita: number }>(`
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
                  COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
-          FROM compras co
-          WHERE co.status IN ('COMPLETE', 'APPROVED')
-            AND co.produto_id = ANY($1::uuid[])
-            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
-            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
+          FROM (
+            SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
+              cliente_id, valor_liquido, valor
+            FROM compras
+            WHERE status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+              AND produto_id = ANY($1::uuid[])
+              AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $2::date
+              AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $3::date
+            ORDER BY COALESCE(hotmart_transaction_id, id::text),
+                     CASE status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
+          ) co
         `, [principalIds, inicio, fim])
       : queryOne<{ total_clientes: number; receita: number }>(`
           SELECT COUNT(DISTINCT co.cliente_id)::int AS total_clientes,
                  COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS receita
-          FROM compras co
-          JOIN produtos p ON p.id = co.produto_id
-          WHERE co.status IN ('COMPLETE', 'APPROVED')
-            AND p.tipo = 'principal'
-            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
-            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+          FROM (
+            SELECT DISTINCT ON (COALESCE(c2.hotmart_transaction_id, c2.id::text))
+              c2.cliente_id, c2.valor_liquido, c2.valor
+            FROM compras c2
+            JOIN produtos p ON p.id = c2.produto_id
+            WHERE c2.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+              AND p.tipo = 'principal'
+              AND (c2.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+              AND (c2.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+            ORDER BY COALESCE(c2.hotmart_transaction_id, c2.id::text),
+                     CASE c2.status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
+          ) co
         `, [inicio, fim]))
 
     const entrada = entradaRow ?? { total_clientes: 0, receita: 0 }
@@ -272,11 +302,17 @@ relatoriosRouter.get('/produtos', async (req: Request, res: Response) => {
         COALESCE(AVG(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::float AS ticket_medio,
         COUNT(DISTINCT co.cliente_id)::int         AS novos_clientes
       FROM produtos p
-      JOIN compras co ON co.produto_id = p.id
-        AND co.status IN ('COMPLETE', 'APPROVED')
-        AND COALESCE(co.valor_liquido, co.valor) IS NOT NULL
-        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
-        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+      JOIN (
+        SELECT DISTINCT ON (COALESCE(hotmart_transaction_id, id::text))
+          id, produto_id, cliente_id, valor_liquido, valor
+        FROM compras
+        WHERE status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+          AND COALESCE(valor_liquido, valor) IS NOT NULL
+          AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+          AND (data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+        ORDER BY COALESCE(hotmart_transaction_id, id::text),
+                 CASE status WHEN 'COMPLETE' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END
+      ) co ON co.produto_id = p.id
       GROUP BY p.id, p.nome, p.tipo
       ORDER BY receita DESC
     `, [inicio, fim])

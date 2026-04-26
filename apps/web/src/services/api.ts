@@ -515,6 +515,11 @@ export const fluxoAtivoApi = {
       `/api/cadencias/clientes-trilha/${id}/avancar`,
       { status_contato, observacao }
     ).then(r => r.data),
+
+  atualizarPrioridades: () =>
+    api.post<{ success: boolean; removidos: number; reinseridos: number; mensagem: string }>(
+      '/api/cadencias/fluxo-ativo/atualizar-prioridades'
+    ).then(r => r.data),
 }
 
 // ── Reativação ────────────────────────────────────────────────────────────
@@ -569,6 +574,11 @@ export const reativacaoApi = {
     api.patch<{ success: boolean; proximo_status: string; data_proxima_etapa: string | null }>(
       `/api/reativacao/clientes-trilha/${id}/avancar`,
       { status_contato, observacao }
+    ).then(r => r.data),
+
+  atualizarPrioridades: () =>
+    api.post<{ success: boolean; removidos: number; reinseridos: number }>(
+      '/api/cadencias/reativacao/atualizar-prioridades'
     ).then(r => r.data),
 }
 

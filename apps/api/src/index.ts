@@ -27,7 +27,7 @@ import { apenasAdmin } from './middleware/perfil'
 import { authRouter } from './routes/auth'
 import { executarSync } from './jobs/sync'
 import { executarGeracaoLista } from './jobs/lista'
-import { executarListaReativacao, executarPopularFilaReativacao } from './jobs/cadencia'
+import { executarListaReativacao, executarPopularFilaReativacao, executarAtualizarPrioridades } from './jobs/cadencia'
 
 process.env.TZ = 'America/Sao_Paulo'
 
@@ -162,9 +162,10 @@ cron.schedule('5 6 * * *', async () => {
   try { await executarListaReativacao() } catch {}
 })
 
-// ── Cron: popula fila de reativação todo domingo às 23:00 ─────────────────
+// ── Cron: popula fila de reativação e atualiza prioridades todo domingo às 23:00 ──
 cron.schedule('0 23 * * 0', async () => {
   try { await executarPopularFilaReativacao() } catch {}
+  try { await executarAtualizarPrioridades() } catch {}
 })
 
 // ── Start ──────────────────────────────────────────────────────────────────

@@ -185,11 +185,13 @@ type TabEtapa = 'todos' | '1' | '2' | '3+'
 
 export default function FluxoAtivo() {
   const toast = useToast()
-  const [itens,    setItens]    = useState<ItemFluxoAtivo[]>([])
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState<string | null>(null)
-  const [tabEtapa, setTabEtapa] = useState<TabEtapa>('todos')
-  const [busca,    setBusca]    = useState('')
+  const [itens,              setItens]              = useState<ItemFluxoAtivo[]>([])
+  const [loading,            setLoading]            = useState(true)
+  const [error,              setError]              = useState<string | null>(null)
+  const [tabEtapa,           setTabEtapa]           = useState<TabEtapa>('todos')
+  const [busca,              setBusca]              = useState('')
+  const [modalPrioridades,   setModalPrioridades]   = useState(false)
+  const [atualizandoPrior,   setAtualizandoPrior]   = useState(false)
   const toastRef = useRef(toast)
   toastRef.current = toast
 
@@ -214,6 +216,20 @@ export default function FluxoAtivo() {
       toastRef.current.success('Convertido! Excelente trabalho!')
     } else {
       toastRef.current.success('Resultado registrado.')
+    }
+  }
+
+  async function atualizarPrioridades() {
+    setAtualizandoPrior(true)
+    setModalPrioridades(false)
+    try {
+      const r = await fluxoAtivoApi.atualizarPrioridades()
+      toastRef.current.success(r.mensagem)
+      await carregar()
+    } catch {
+      toastRef.current.error('Erro ao atualizar prioridades.')
+    } finally {
+      setAtualizandoPrior(false)
     }
   }
 
@@ -268,6 +284,18 @@ export default function FluxoAtivo() {
               onChange={e => setBusca(e.target.value)}
               className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 w-56"
             />
+            <button
+              onClick={() => setModalPrioridades(true)}
+              disabled={atualizandoPrior || loading}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+            >
+              {atualizandoPrior ? (
+                <span className="inline-block w-3.5 h-3.5 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <span>↻</span>
+              )}
+              Atualizar prioridades
+            </button>
             <button
               onClick={carregar}
               disabled={loading}
@@ -341,6 +369,34 @@ export default function FluxoAtivo() {
           </div>
         )}
       </div>
+
+      {/* Modal: confirmar atualização de prioridades */}
+      {modalPrioridades && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Atualizar prioridades?</h3>
+            <p className="text-sm text-gray-600 mb-5">
+              Isso vai <strong>remover</strong> todos os contatos que ainda não foram abordados (etapa 1)
+              e <strong>reinserir</strong> os clientes com compras nos últimos 30 dias,
+              reordenando por prioridade. Quem já foi contatado não é afetado.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setModalPrioridades(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={atualizarPrioridades}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors"
+              >
+                Sim, atualizar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -7,6 +7,7 @@ import {
   inscreverClienteNaTrilhaAutomaticamente,
   buscarMetricasCadencias,
 } from '../services/cadencia'
+import { popularFilaReativacao } from '../services/reativacao'
 
 export const cadenciasRouter = Router()
 
@@ -480,6 +481,77 @@ cadenciasRouter.get('/fluxo-ativo', async (_req: Request, res: Response) => {
     })
 
     res.json({ success: true, total: itens.length, itens })
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
+// ── POST /api/cadencias/fluxo-ativo/atualizar-prioridades ────────────────
+cadenciasRouter.post('/fluxo-ativo/atualizar-prioridades', async (_req: Request, res: Response) => {
+  try {
+    const deletado = await pool.query(`
+      DELETE FROM clientes_trilha
+      WHERE etapa_atual = 1
+        AND status = 'ativo'
+        AND (tipo_pipeline = 'ativo' OR tipo_pipeline IS NULL)
+    `)
+    const removidos = deletado.rowCount ?? 0
+
+    const clientes = await query<{ cliente_id: string; produto_id: string }>(`
+      SELECT DISTINCT ON (co.cliente_id) co.cliente_id, co.produto_id
+      FROM compras co
+      WHERE (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date
+              >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date - INTERVAL '30 days'
+        AND co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+      ORDER BY co.cliente_id, co.data_compra DESC
+    `)
+
+    let reinseridos = 0
+    for (const c of clientes) {
+      const trilhaId = await inscreverClienteNaTrilhaAutomaticamente(c.cliente_id, c.produto_id)
+      if (trilhaId) reinseridos++
+    }
+
+    if (reinseridos > 0) {
+      await pool.query(`
+        UPDATE clientes_trilha
+        SET data_proxima_etapa = NOW()
+        WHERE etapa_atual = 1
+          AND status = 'ativo'
+          AND (tipo_pipeline = 'ativo' OR tipo_pipeline IS NULL)
+          AND data_proxima_etapa > NOW()
+      `)
+    }
+
+    res.json({
+      success: true,
+      removidos,
+      reinseridos,
+      mensagem: `${removidos} contatos removidos e ${reinseridos} reinseridos com prioridade atualizada`,
+    })
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
+// ── POST /api/cadencias/reativacao/atualizar-prioridades ─────────────────
+cadenciasRouter.post('/reativacao/atualizar-prioridades', async (_req: Request, res: Response) => {
+  try {
+    const deletado = await pool.query(`
+      DELETE FROM clientes_trilha
+      WHERE etapa_atual = 1
+        AND status = 'ativo'
+        AND tipo_pipeline = 'reativacao'
+    `)
+    const removidos = deletado.rowCount ?? 0
+
+    const resultado = await popularFilaReativacao()
+
+    res.json({
+      success: true,
+      removidos,
+      reinseridos: resultado.adicionados,
+    })
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) })
   }

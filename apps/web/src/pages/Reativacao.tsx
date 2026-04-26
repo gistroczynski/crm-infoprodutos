@@ -231,11 +231,13 @@ function CardReativacao({
 
 export default function Reativacao() {
   const toast = useToast()
-  const [itens,     setItens]     = useState<ItemReativacao[]>([])
-  const [stats,     setStats]     = useState<StatsReativacao | null>(null)
-  const [loading,   setLoading]   = useState(true)
-  const [populando, setPopulando] = useState(false)
-  const [error,     setError]     = useState<string | null>(null)
+  const [itens,            setItens]            = useState<ItemReativacao[]>([])
+  const [stats,            setStats]            = useState<StatsReativacao | null>(null)
+  const [loading,          setLoading]          = useState(true)
+  const [populando,        setPopulando]        = useState(false)
+  const [error,            setError]            = useState<string | null>(null)
+  const [modalPrioridades, setModalPrioridades] = useState(false)
+  const [atualizandoPrior, setAtualizandoPrior] = useState(false)
   const toastRef = useRef(toast)
   toastRef.current = toast
 
@@ -273,6 +275,20 @@ export default function Reativacao() {
     }
   }
 
+  async function atualizarPrioridades() {
+    setAtualizandoPrior(true)
+    setModalPrioridades(false)
+    try {
+      const r = await reativacaoApi.atualizarPrioridades()
+      toastRef.current.success(`Fila de reativação reorganizada! ${r.reinseridos} contatos na fila.`)
+      await carregar()
+    } catch {
+      toastRef.current.error('Erro ao atualizar prioridades.')
+    } finally {
+      setAtualizandoPrior(false)
+    }
+  }
+
   async function avancar(id: string, resultado: string, obs?: string) {
     await reativacaoApi.avancar(id, resultado, obs)
     if (resultado === 'convertido') {
@@ -301,6 +317,18 @@ export default function Reativacao() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setModalPrioridades(true)}
+              disabled={atualizandoPrior || loading}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-orange-300 text-orange-600 text-sm font-medium rounded-lg hover:bg-orange-50 disabled:opacity-50 transition-colors"
+            >
+              {atualizandoPrior ? (
+                <span className="inline-block w-3.5 h-3.5 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <span>↻</span>
+              )}
+              Atualizar prioridades
+            </button>
             <button
               onClick={popularFila}
               disabled={populando || loading}
@@ -376,6 +404,34 @@ export default function Reativacao() {
           </div>
         )}
       </div>
+
+      {/* Modal: confirmar atualização de prioridades */}
+      {modalPrioridades && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Atualizar prioridades?</h3>
+            <p className="text-sm text-gray-600 mb-5">
+              Isso vai <strong>reorganizar</strong> a fila de reativação, removendo quem ainda não foi
+              contatado (etapa 1) e reinserindo os candidatos mais elegíveis. Quem já foi contatado
+              não é afetado.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setModalPrioridades(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={atualizarPrioridades}
+                className="px-4 py-2 text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 rounded-lg transition-colors"
+              >
+                Sim, reorganizar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

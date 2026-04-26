@@ -9,7 +9,6 @@ import { useToast } from '../hooks/useToast'
 type Aba = 'geral' | 'funil' | 'comercial' | 'telefones' | 'mensagens'
 
 const labels: Record<string, string> = {
-  limite_lista_diaria:    'Limite da lista diária',
   score_alta_prioridade:  'Score mínimo — Alta prioridade',
   score_media_prioridade: 'Score mínimo — Média prioridade',
   ddi_padrao:             'DDI padrão (ex: 55)',

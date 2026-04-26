@@ -3,19 +3,17 @@ import { query, queryOne } from '../db'
 
 export const vendasRouter = Router()
 
+// ── Constantes de status e deduplicação ───────────────────────────────────
+const STATUS_OK = `co.status IN ('COMPLETE', 'COMPLETED')`
+const TX_KEY    = `COALESCE(co.hotmart_transaction_id, co.id::text)`
+
+// ── Helpers de timezone ────────────────────────────────────────────────────
+const TZ        = `'America/Sao_Paulo'`
+const HOJE_BRT  = `(NOW() AT TIME ZONE ${TZ})::date`
+const ONTEM_BRT = `(NOW() AT TIME ZONE ${TZ})::date - 1`
+const DATA_BRT  = (col: string) => `(${col} AT TIME ZONE ${TZ})::date`
+
 // ── Helper: monta condições WHERE reutilizáveis ────────────────────────────
-
-// APPROVED incluído apenas para transações dos últimos 7 dias (ainda podem completar).
-// Transações APPROVED mais antigas provavelmente não vão completar e inflariam os totais.
-const STATUS_RECENTE = `(
-  co.status IN ('COMPLETE', 'COMPLETED')
-  OR (
-    co.status = 'APPROVED'
-    AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date
-          > (NOW() AT TIME ZONE 'America/Sao_Paulo')::date - INTERVAL '7 days'
-  )
-)`
-
 function buildWhere(
   inicio: string,
   fim: string,
@@ -24,7 +22,7 @@ function buildWhere(
   startAt = 1,
 ) {
   const conds: string[] = [
-    STATUS_RECENTE,
+    STATUS_OK,
     `(co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $${startAt}::date`,
     `(co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $${startAt + 1}::date`,
   ]
@@ -47,14 +45,6 @@ const FROM_JOIN = `
   JOIN clientes c ON c.id = co.cliente_id
   JOIN produtos p ON p.id = co.produto_id
 `
-
-// ── Helpers de timezone ────────────────────────────────────────────────────
-// O banco armazena timestamps em UTC. Compara no timezone do Brasil para que
-// vendas feitas entre 00:00-03:00 BRT (03:00-06:00 UTC) apareçam como "hoje".
-const TZ        = `'America/Sao_Paulo'`
-const HOJE_BRT  = `(NOW() AT TIME ZONE ${TZ})::date`
-const ONTEM_BRT = `(NOW() AT TIME ZONE ${TZ})::date - 1`
-const DATA_BRT  = (col: string) => `(${col} AT TIME ZONE ${TZ})::date`
 
 // ── GET /api/vendas ─────────────────────────────────────────────────────────
 
@@ -101,61 +91,84 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
 
     const [vendas, stats, porDia, comparacaoRow] = await Promise.all([
 
+      // List with dedup: DISTINCT ON inside, then re-sort by date outside
       query<{
         id: string; transaction_id: string; cliente_id: string
         cliente_nome: string; cliente_email: string; cliente_telefone: string | null
         produto_nome: string; produto_tipo: string; is_order_bump: boolean
         valor: number | null; data_compra: string; dias_atras: number
       }>(`
-        SELECT
-          co.id,
-          co.hotmart_transaction_id          AS transaction_id,
-          c.id                               AS cliente_id,
-          c.nome                             AS cliente_nome,
-          c.email                            AS cliente_email,
-          c.telefone_formatado               AS cliente_telefone,
-          p.nome                             AS produto_nome,
-          p.tipo                             AS produto_tipo,
-          COALESCE(co.is_order_bump, false)           AS is_order_bump,
-          COALESCE(co.valor_liquido, co.valor)::float AS valor,
-          co.data_compra,
-          (${HOJE_BRT} - (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date)::int AS dias_atras
-        ${FROM_JOIN}
-        ${listWhere}
-        ORDER BY co.data_compra DESC
+        SELECT * FROM (
+          SELECT DISTINCT ON (${TX_KEY})
+            co.id,
+            co.hotmart_transaction_id          AS transaction_id,
+            c.id                               AS cliente_id,
+            c.nome                             AS cliente_nome,
+            c.email                            AS cliente_email,
+            c.telefone_formatado               AS cliente_telefone,
+            p.nome                             AS produto_nome,
+            p.tipo                             AS produto_tipo,
+            COALESCE(co.is_order_bump, false)           AS is_order_bump,
+            COALESCE(co.valor_liquido, co.valor)::float AS valor,
+            co.data_compra,
+            (${HOJE_BRT} - (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date)::int AS dias_atras
+          ${FROM_JOIN}
+          ${listWhere}
+          ORDER BY ${TX_KEY}, co.data_compra DESC
+        ) t
+        ORDER BY t.data_compra DESC
         LIMIT $1 OFFSET $2
       `, listParams),
 
+      // Stats with dedup subquery
       queryOne<{ total: string; receita: string; ticket: string }>(`
         SELECT
           COUNT(*)::text                                                                   AS total,
-          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita,
+          COALESCE(SUM(COALESCE(v.valor_liquido, v.valor)::numeric), 0)::text             AS receita,
           CASE WHEN COUNT(*) > 0
-               THEN (SUM(COALESCE(co.valor_liquido, co.valor)::numeric) / COUNT(*))::text
+               THEN (SUM(COALESCE(v.valor_liquido, v.valor)::numeric) / COUNT(*))::text
                ELSE '0' END                                                                AS ticket
-        ${FROM_JOIN}
-        ${baseWhere}
+        FROM (
+          SELECT DISTINCT ON (${TX_KEY})
+            co.valor, co.valor_liquido
+          ${FROM_JOIN}
+          ${baseWhere}
+          ORDER BY ${TX_KEY}, co.data_compra DESC
+        ) v
       `, baseParams),
 
+      // Por dia with dedup subquery
       query<{ data: string; quantidade: string; receita: string }>(`
         SELECT
-          (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date::text                   AS data,
+          v.data_brt::text                                                                  AS data,
           COUNT(*)::text                                                                    AS quantidade,
-          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text            AS receita
-        ${FROM_JOIN}
-        ${baseWhere}
-        GROUP BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date
-        ORDER BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date
+          COALESCE(SUM(COALESCE(v.valor_liquido, v.valor)::numeric), 0)::text              AS receita
+        FROM (
+          SELECT DISTINCT ON (${TX_KEY})
+            co.valor, co.valor_liquido,
+            (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date AS data_brt
+          ${FROM_JOIN}
+          ${baseWhere}
+          ORDER BY ${TX_KEY}, co.data_compra DESC
+        ) v
+        GROUP BY v.data_brt
+        ORDER BY v.data_brt
       `, baseParams),
 
+      // Comparison period with dedup subquery
       queryOne<{ total: string; receita: string }>(`
         SELECT
           COUNT(*)::text                                                                   AS total,
-          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
-        ${FROM_JOIN}
-        WHERE ${STATUS_RECENTE}
-          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= ${antInicioSql}
-          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= ${antFimSql}
+          COALESCE(SUM(COALESCE(v.valor_liquido, v.valor)::numeric), 0)::text             AS receita
+        FROM (
+          SELECT DISTINCT ON (${TX_KEY})
+            co.valor, co.valor_liquido
+          ${FROM_JOIN}
+          WHERE ${STATUS_OK}
+            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= ${antInicioSql}
+            AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= ${antFimSql}
+          ORDER BY ${TX_KEY}, co.data_compra DESC
+        ) v
       `, baseParams),
     ])
 
@@ -203,60 +216,82 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
   try {
     const [vendasHoje, statsHoje, statsOntem, topProdutos] = await Promise.all([
 
+      // List with dedup
       query<{
         id: string; transaction_id: string; cliente_id: string
         cliente_nome: string; cliente_email: string; cliente_telefone: string | null
         produto_nome: string; produto_tipo: string; is_order_bump: boolean
         valor: number | null; data_compra: string
       }>(`
-        SELECT
-          co.id,
-          co.hotmart_transaction_id          AS transaction_id,
-          c.id                               AS cliente_id,
-          c.nome                             AS cliente_nome,
-          c.email                            AS cliente_email,
-          c.telefone_formatado               AS cliente_telefone,
-          p.nome                             AS produto_nome,
-          p.tipo                             AS produto_tipo,
-          COALESCE(co.is_order_bump, false)           AS is_order_bump,
-          COALESCE(co.valor_liquido, co.valor)::float AS valor,
-          co.data_compra
-        ${FROM_JOIN}
-        WHERE ${STATUS_RECENTE}
-          AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
-        ORDER BY co.data_compra DESC
+        SELECT * FROM (
+          SELECT DISTINCT ON (${TX_KEY})
+            co.id,
+            co.hotmart_transaction_id          AS transaction_id,
+            c.id                               AS cliente_id,
+            c.nome                             AS cliente_nome,
+            c.email                            AS cliente_email,
+            c.telefone_formatado               AS cliente_telefone,
+            p.nome                             AS produto_nome,
+            p.tipo                             AS produto_tipo,
+            COALESCE(co.is_order_bump, false)           AS is_order_bump,
+            COALESCE(co.valor_liquido, co.valor)::float AS valor,
+            co.data_compra
+          ${FROM_JOIN}
+          WHERE ${STATUS_OK}
+            AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
+          ORDER BY ${TX_KEY}, co.data_compra DESC
+        ) t
+        ORDER BY t.data_compra DESC
       `),
 
+      // Stats hoje with dedup
       queryOne<{ total: string; receita: string; ticket: string }>(`
         SELECT
           COUNT(*)::text                                                                   AS total,
-          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita,
+          COALESCE(SUM(COALESCE(v.valor_liquido, v.valor)::numeric), 0)::text             AS receita,
           CASE WHEN COUNT(*) > 0
-               THEN (SUM(COALESCE(co.valor_liquido, co.valor)::numeric) / COUNT(*))::text
+               THEN (SUM(COALESCE(v.valor_liquido, v.valor)::numeric) / COUNT(*))::text
                ELSE '0' END                                                                AS ticket
-        ${FROM_JOIN}
-        WHERE ${STATUS_RECENTE}
-          AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
+        FROM (
+          SELECT DISTINCT ON (${TX_KEY})
+            co.valor, co.valor_liquido
+          ${FROM_JOIN}
+          WHERE ${STATUS_OK}
+            AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
+          ORDER BY ${TX_KEY}, co.data_compra DESC
+        ) v
       `),
 
+      // Stats ontem with dedup
       queryOne<{ total: string; receita: string }>(`
         SELECT
           COUNT(*)::text                                                                   AS total,
-          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
-        ${FROM_JOIN}
-        WHERE ${STATUS_RECENTE}
-          AND ${DATA_BRT('co.data_compra')} = ${ONTEM_BRT}
+          COALESCE(SUM(COALESCE(v.valor_liquido, v.valor)::numeric), 0)::text             AS receita
+        FROM (
+          SELECT DISTINCT ON (${TX_KEY})
+            co.valor, co.valor_liquido
+          ${FROM_JOIN}
+          WHERE ${STATUS_OK}
+            AND ${DATA_BRT('co.data_compra')} = ${ONTEM_BRT}
+          ORDER BY ${TX_KEY}, co.data_compra DESC
+        ) v
       `),
 
+      // Top produtos hoje with dedup
       query<{ nome: string; quantidade: string; receita: string }>(`
         SELECT
-          p.nome,
-          COUNT(*)::text                                                                   AS quantidade,
-          COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
-        ${FROM_JOIN}
-        WHERE ${STATUS_RECENTE}
-          AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
-        GROUP BY p.nome
+          v.produto_nome                                                                    AS nome,
+          COUNT(*)::text                                                                    AS quantidade,
+          COALESCE(SUM(COALESCE(v.valor_liquido, v.valor)::numeric), 0)::text              AS receita
+        FROM (
+          SELECT DISTINCT ON (${TX_KEY})
+            co.valor, co.valor_liquido, p.nome AS produto_nome
+          ${FROM_JOIN}
+          WHERE ${STATUS_OK}
+            AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
+          ORDER BY ${TX_KEY}, co.data_compra DESC
+        ) v
+        GROUP BY v.produto_nome
         ORDER BY COUNT(*) DESC
         LIMIT 5
       `),
@@ -311,16 +346,23 @@ vendasRouter.get('/resumo-diario', async (req: Request, res: Response) => {
       data: string; produto_nome: string; quantidade: string; receita: string
     }>(`
       SELECT
-        (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date::text AS data,
-        p.nome                                  AS produto_nome,
-        COUNT(*)::text                                                                  AS quantidade,
-        COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
-      ${FROM_JOIN}
-      WHERE ${STATUS_RECENTE}
-        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
-        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
-      GROUP BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date, p.nome
-      ORDER BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date, p.nome
+        v.data_brt::text                                                                    AS data,
+        v.produto_nome,
+        COUNT(*)::text                                                                      AS quantidade,
+        COALESCE(SUM(COALESCE(v.valor_liquido, v.valor)::numeric), 0)::text                AS receita
+      FROM (
+        SELECT DISTINCT ON (${TX_KEY})
+          co.valor, co.valor_liquido,
+          (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date AS data_brt,
+          p.nome AS produto_nome
+        ${FROM_JOIN}
+        WHERE ${STATUS_OK}
+          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+          AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+        ORDER BY ${TX_KEY}, co.data_compra DESC
+      ) v
+      GROUP BY v.data_brt, v.produto_nome
+      ORDER BY v.data_brt, v.produto_nome
     `, [inicio, fim])
 
     // Agrupar por data

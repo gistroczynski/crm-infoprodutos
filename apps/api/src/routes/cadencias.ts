@@ -148,24 +148,63 @@ cadenciasRouter.get('/trilhas/:id', async (req: Request, res: Response) => {
   }
 })
 
+// ── Helpers de criação de etapas ─────────────────────────────────────────
+
+const DIAS_POR_ETAPAS: Record<number, number[]> = {
+  3: [1, 7, 21],
+  4: [1, 7, 14, 30],
+  5: [1, 3, 7, 14, 30],
+  6: [1, 3, 7, 14, 21, 30],
+}
+
+const MENSAGENS_PADRAO = [
+  'Olá {nome}! Vi que você acabou de adquirir o {produto}. Estou aqui se precisar de qualquer ajuda 👊',
+  'E aí {nome}, como está sendo sua experiência com o {produto}?',
+  'Oi {nome}! Tenho algo que pode complementar muito bem o {produto} que você tem. Posso te contar?',
+  '{nome}, vou ser direto: o Conduta Masculina é o próximo passo natural para quem tem o {produto}. Quer saber mais?',
+  '{nome}, ainda dá tempo de dar o próximo passo. O Conduta Masculina vai complementar tudo que você já tem 💪',
+  'Última mensagem por aqui, {nome}. Quando sentir que é hora do próximo nível, o Conduta vai estar aqui 🤝',
+]
+
 // ── POST /api/cadencias/trilhas ───────────────────────────────────────────
-const trilhaSchema = z.object({
+const trilhaCreateSchema = z.object({
   nome:               z.string().min(1),
   descricao:          z.string().optional(),
-  produto_entrada_id: z.string().uuid().optional(),
-  produto_destino_id: z.string().uuid().optional(),
+  tipo_pipeline:      z.enum(['ativo', 'reativacao']).default('ativo'),
+  produto_entrada_id: z.string().uuid().nullable().optional(),
+  produto_destino_id: z.string().uuid().nullable().optional(),
   cor:                z.string().optional(),
+  num_etapas:         z.number().int().min(3).max(6).default(5),
 })
 
 cadenciasRouter.post('/trilhas', async (req: Request, res: Response) => {
   try {
-    const body = trilhaSchema.parse(req.body)
+    const body = trilhaCreateSchema.parse(req.body)
+
     const nova = await queryOne<{ id: string }>(`
-      INSERT INTO trilhas_cadencia (nome, descricao, produto_entrada_id, produto_destino_id, cor)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO trilhas_cadencia (nome, descricao, tipo_pipeline, produto_entrada_id, produto_destino_id, cor)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id
-    `, [body.nome, body.descricao ?? null, body.produto_entrada_id ?? null, body.produto_destino_id ?? null, body.cor ?? '#3B82F6'])
-    res.status(201).json({ success: true, id: nova!.id })
+    `, [
+      body.nome,
+      body.descricao ?? null,
+      body.tipo_pipeline,
+      body.produto_entrada_id ?? null,
+      body.produto_destino_id ?? null,
+      body.cor ?? '#3B82F6',
+    ])
+
+    const trilhaId = nova!.id
+    const dias = DIAS_POR_ETAPAS[body.num_etapas]
+
+    for (let i = 0; i < body.num_etapas; i++) {
+      await query(`
+        INSERT INTO etapas_cadencia (trilha_id, numero_etapa, nome, dia_envio, mensagem_whatsapp, ativa, ordem)
+        VALUES ($1, $2, $3, $4, $5, true, $2)
+      `, [trilhaId, i + 1, `Mensagem ${i + 1}`, dias[i], MENSAGENS_PADRAO[i]])
+    }
+
+    res.status(201).json({ success: true, id: trilhaId })
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors })
     res.status(500).json({ success: false, error: String(err) })
@@ -173,22 +212,70 @@ cadenciasRouter.post('/trilhas', async (req: Request, res: Response) => {
 })
 
 // ── PUT /api/cadencias/trilhas/:id ────────────────────────────────────────
+const trilhaUpdateSchema = z.object({
+  nome:               z.string().min(1).optional(),
+  descricao:          z.string().optional(),
+  tipo_pipeline:      z.enum(['ativo', 'reativacao']).optional(),
+  produto_entrada_id: z.string().uuid().nullable().optional(),
+  produto_destino_id: z.string().uuid().nullable().optional(),
+  cor:                z.string().optional(),
+  ativa:              z.boolean().optional(),
+})
+
 cadenciasRouter.put('/trilhas/:id', async (req: Request, res: Response) => {
   try {
-    const body = trilhaSchema.partial().parse(req.body)
+    const body = trilhaUpdateSchema.parse(req.body)
     await pool.query(`
       UPDATE trilhas_cadencia
       SET
-        nome               = COALESCE($2, nome),
-        descricao          = COALESCE($3, descricao),
-        produto_entrada_id = COALESCE($4::uuid, produto_entrada_id),
-        produto_destino_id = COALESCE($5::uuid, produto_destino_id),
-        cor                = COALESCE($6, cor)
+        nome               = COALESCE($2,        nome),
+        produto_entrada_id = COALESCE($3::uuid,  produto_entrada_id),
+        produto_destino_id = COALESCE($4::uuid,  produto_destino_id),
+        cor                = COALESCE($5,        cor),
+        ativa              = COALESCE($6,        ativa),
+        tipo_pipeline      = COALESCE($7,        tipo_pipeline)
       WHERE id = $1
-    `, [req.params.id, body.nome ?? null, body.descricao ?? null, body.produto_entrada_id ?? null, body.produto_destino_id ?? null, body.cor ?? null])
+    `, [
+      req.params.id,
+      body.nome               ?? null,
+      body.produto_entrada_id ?? null,
+      body.produto_destino_id ?? null,
+      body.cor                ?? null,
+      body.ativa              ?? null,
+      body.tipo_pipeline      ?? null,
+    ])
     res.json({ success: true })
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors })
+    res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
+// ── DELETE /api/cadencias/trilhas/:id ─────────────────────────────────────
+cadenciasRouter.delete('/trilhas/:id', async (req: Request, res: Response) => {
+  try {
+    const ativos = await queryOne<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM clientes_trilha WHERE trilha_id = $1 AND status = 'ativo'`,
+      [req.params.id]
+    )
+
+    if ((ativos?.count ?? 0) > 0) {
+      return res.status(409).json({
+        success:         false,
+        error:           `Esta trilha possui ${ativos!.count} cliente(s) em andamento.`,
+        clientes_ativos: ativos!.count,
+      })
+    }
+
+    await pool.query('BEGIN')
+    await pool.query('DELETE FROM clientes_trilha  WHERE trilha_id = $1', [req.params.id])
+    await pool.query('DELETE FROM etapas_cadencia  WHERE trilha_id = $1', [req.params.id])
+    await pool.query('DELETE FROM trilhas_cadencia WHERE id        = $1', [req.params.id])
+    await pool.query('COMMIT')
+
+    res.json({ success: true })
+  } catch (err) {
+    await pool.query('ROLLBACK').catch(() => {})
     res.status(500).json({ success: false, error: String(err) })
   }
 })

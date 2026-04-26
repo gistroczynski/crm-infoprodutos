@@ -456,6 +456,29 @@ export const cadenciasApi = {
         total_chegaram: number; convertidos: number; desistiram: number
       }>
     }>('/api/cadencias/metricas').then(r => r.data),
+
+  criarTrilha: (data: {
+    nome: string
+    tipo_pipeline: 'ativo' | 'reativacao'
+    produto_entrada_id?: string | null
+    produto_destino_id?: string | null
+    cor?: string
+    num_etapas: number
+  }) =>
+    api.post<{ success: boolean; id: string }>('/api/cadencias/trilhas', data).then(r => r.data),
+
+  editarTrilha: (id: string, data: {
+    nome?: string
+    tipo_pipeline?: 'ativo' | 'reativacao'
+    produto_entrada_id?: string | null
+    produto_destino_id?: string | null
+    cor?: string
+    ativa?: boolean
+  }) =>
+    api.put<{ success: boolean }>(`/api/cadencias/trilhas/${id}`, data).then(r => r.data),
+
+  excluirTrilha: (id: string) =>
+    api.delete<{ success: boolean }>(`/api/cadencias/trilhas/${id}`).then(r => r.data),
 }
 
 // ── Fluxo Ativo ───────────────────────────────────────────────────────────

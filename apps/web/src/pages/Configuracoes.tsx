@@ -398,6 +398,11 @@ const CONTEXTO_CORES: Record<string, string> = {
 const VARIAVEIS_TEMPLATE = ['{nome}', '{produto}', '{dias}']
 const VARIAVEIS_ETAPA    = ['{nome}', '{produto}']
 
+const CORES_TRILHA = [
+  '#6366f1', '#8b5cf6', '#ec4899', '#f59e0b',
+  '#10b981', '#3b82f6', '#ef4444', '#06b6d4',
+]
+
 const EXEMPLOS: Record<string, string> = {
   '{nome}':    'João Silva',
   '{produto}': 'Conduta Masculina',
@@ -530,7 +535,15 @@ function ModalEtapaEditar({
 
 // ── Acordeão de trilha ──────────────────────────────────────────────────────
 
-function AcordaoTrilha({ trilha }: { trilha: TrilhaCadencia }) {
+function AcordaoTrilha({
+  trilha,
+  onEditar,
+  onExcluir,
+}: {
+  trilha: TrilhaCadencia
+  onEditar: (t: TrilhaCadencia) => void
+  onExcluir: (t: TrilhaCadencia) => void
+}) {
   const toast = useToast()
   const [aberto,    setAberto]    = useState(false)
   const [etapas,    setEtapas]    = useState<EtapaCadencia[] | null>(null)
@@ -561,14 +574,17 @@ function AcordaoTrilha({ trilha }: { trilha: TrilhaCadencia }) {
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
-      {/* Header do acordeão */}
-      <button
-        onClick={toggle}
-        className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 text-left transition-colors"
-      >
-        <div className="flex items-center gap-3 min-w-0">
+      {/* Header do acordeão — div para evitar botões aninhados */}
+      <div className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 transition-colors">
+        <div
+          className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+          onClick={toggle}
+        >
           <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: trilha.cor }} />
           <span className="text-sm font-semibold text-gray-900 truncate">{trilha.nome}</span>
+          {!trilha.ativa && (
+            <span className="text-[10px] font-bold uppercase bg-red-50 text-red-500 px-1.5 py-0.5 rounded flex-shrink-0">inativa</span>
+          )}
           {trilha.produto_entrada && (
             <span className="text-xs text-gray-400 truncate hidden md:block">
               {trilha.produto_entrada}
@@ -576,16 +592,42 @@ function AcordaoTrilha({ trilha }: { trilha: TrilhaCadencia }) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-          <span className="text-xs text-gray-400 tabular-nums">{trilha.total_etapas} etapas</span>
-          <svg
-            className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${aberto ? 'rotate-180' : ''}`}
-            fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
+        <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
+          <span className="text-xs text-gray-400 tabular-nums mr-1">{trilha.total_etapas} etapas</span>
+          <button
+            onClick={e => { e.stopPropagation(); onEditar(trilha) }}
+            title="Editar trilha"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onExcluir(trilha) }}
+            title="Excluir trilha"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+              <path d="M10 11v6M14 11v6" />
+              <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+            </svg>
+          </button>
+          <div
+            onClick={toggle}
+            className="p-1.5 cursor-pointer rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
+          >
+            <svg
+              className={`w-4 h-4 transition-transform duration-200 ${aberto ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
         </div>
-      </button>
+      </div>
 
       {/* Etapas */}
       {aberto && (
@@ -629,6 +671,269 @@ function AcordaoTrilha({ trilha }: { trilha: TrilhaCadencia }) {
           onClose={() => setModalEtapa(null)}
         />
       )}
+    </div>
+  )
+}
+
+// ── Modal criar trilha ─────────────────────────────────────────────────────
+
+function ModalCriarTrilha({
+  produtos,
+  onSave,
+  onClose,
+}: {
+  produtos: Produto[]
+  onSave: (data: {
+    nome: string; tipo_pipeline: 'ativo' | 'reativacao'
+    produto_entrada_id: string | null; produto_destino_id: string | null
+    cor: string; num_etapas: number
+  }) => Promise<void>
+  onClose: () => void
+}) {
+  const [nome,      setNome]      = useState('')
+  const [tipo,      setTipo]      = useState<'ativo' | 'reativacao'>('ativo')
+  const [entradaId, setEntradaId] = useState('')
+  const [destinoId, setDestinoId] = useState('')
+  const [cor,       setCor]       = useState(CORES_TRILHA[0])
+  const [numEtapas, setNumEtapas] = useState(5)
+  const [saving,    setSaving]    = useState(false)
+
+  async function handleSave() {
+    if (!nome.trim()) return
+    setSaving(true)
+    try {
+      await onSave({
+        nome: nome.trim(), tipo_pipeline: tipo,
+        produto_entrada_id: entradaId || null,
+        produto_destino_id: destinoId || null,
+        cor, num_etapas: numEtapas,
+      })
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-base font-semibold text-gray-900">Nova trilha de cadência</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Nome da trilha</label>
+            <input
+              type="text" value={nome} onChange={e => setNome(e.target.value)}
+              placeholder="Ex: Pós-compra Produto X"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Tipo</label>
+            <div className="flex gap-2">
+              {(['ativo', 'reativacao'] as const).map(t => (
+                <button key={t} type="button" onClick={() => setTipo(t)}
+                  className={[
+                    'flex-1 py-2 text-sm font-medium rounded-lg border transition-colors',
+                    tipo === t
+                      ? 'bg-primary-600 text-white border-primary-600'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-primary-300',
+                  ].join(' ')}
+                >
+                  {t === 'ativo' ? 'Fluxo Ativo' : 'Reativação'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Produto de entrada</label>
+            <select value={entradaId} onChange={e => setEntradaId(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+              <option value="">— Selecionar —</option>
+              {produtos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Produto destino (upsell)</label>
+            <select value={destinoId} onChange={e => setDestinoId(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+              <option value="">— Selecionar —</option>
+              {produtos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Cor da trilha</label>
+            <div className="flex gap-2">
+              {CORES_TRILHA.map(c => (
+                <button key={c} type="button" onClick={() => setCor(c)}
+                  className={['w-7 h-7 rounded-full border-2 transition-all', cor === c ? 'border-gray-900 scale-110' : 'border-transparent'].join(' ')}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Número de etapas</label>
+            <select value={numEtapas} onChange={e => setNumEtapas(Number(e.target.value))}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+              {[3, 4, 5, 6].map(n => <option key={n} value={n}>{n} etapas</option>)}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">As mensagens padrão são criadas automaticamente e podem ser editadas depois.</p>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-100 transition-colors">Cancelar</button>
+          <button onClick={handleSave} disabled={saving || !nome.trim()}
+            className="px-5 py-2 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+            {saving ? 'Criando...' : 'Criar trilha'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Modal editar trilha ────────────────────────────────────────────────────
+
+function ModalEditarTrilha({
+  trilha,
+  produtos,
+  onSave,
+  onClose,
+}: {
+  trilha: TrilhaCadencia
+  produtos: Produto[]
+  onSave: (id: string, data: {
+    nome: string; tipo_pipeline: 'ativo' | 'reativacao'
+    produto_entrada_id: string | null; produto_destino_id: string | null
+    cor: string; ativa: boolean
+  }) => Promise<void>
+  onClose: () => void
+}) {
+  const encontrarId = (nome: string | null) =>
+    nome ? (produtos.find(p => p.nome === nome)?.id ?? '') : ''
+
+  const [nome,      setNome]      = useState(trilha.nome)
+  const [tipo,      setTipo]      = useState<'ativo' | 'reativacao'>(
+    trilha.tipo_pipeline === 'reativacao' ? 'reativacao' : 'ativo'
+  )
+  const [entradaId, setEntradaId] = useState(encontrarId(trilha.produto_entrada))
+  const [destinoId, setDestinoId] = useState(encontrarId(trilha.produto_destino))
+  const [cor,       setCor]       = useState(trilha.cor)
+  const [ativa,     setAtiva]     = useState(trilha.ativa)
+  const [saving,    setSaving]    = useState(false)
+
+  async function handleSave() {
+    if (!nome.trim()) return
+    setSaving(true)
+    try {
+      await onSave(trilha.id, {
+        nome: nome.trim(), tipo_pipeline: tipo,
+        produto_entrada_id: entradaId || null,
+        produto_destino_id: destinoId || null,
+        cor, ativa,
+      })
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-base font-semibold text-gray-900">Editar trilha</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Nome da trilha</label>
+            <input
+              type="text" value={nome} onChange={e => setNome(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Tipo</label>
+            <div className="flex gap-2">
+              {(['ativo', 'reativacao'] as const).map(t => (
+                <button key={t} type="button" onClick={() => setTipo(t)}
+                  className={[
+                    'flex-1 py-2 text-sm font-medium rounded-lg border transition-colors',
+                    tipo === t
+                      ? 'bg-primary-600 text-white border-primary-600'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-primary-300',
+                  ].join(' ')}
+                >
+                  {t === 'ativo' ? 'Fluxo Ativo' : 'Reativação'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Produto de entrada</label>
+            <select value={entradaId} onChange={e => setEntradaId(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+              <option value="">— Selecionar —</option>
+              {produtos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Produto destino (upsell)</label>
+            <select value={destinoId} onChange={e => setDestinoId(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+              <option value="">— Selecionar —</option>
+              {produtos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Cor da trilha</label>
+            <div className="flex gap-2">
+              {CORES_TRILHA.map(c => (
+                <button key={c} type="button" onClick={() => setCor(c)}
+                  className={['w-7 h-7 rounded-full border-2 transition-all', cor === c ? 'border-gray-900 scale-110' : 'border-transparent'].join(' ')}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox" checked={ativa} onChange={e => setAtiva(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+            <span className="text-sm text-gray-700">Trilha ativa</span>
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-100 transition-colors">Cancelar</button>
+          <button onClick={handleSave} disabled={saving || !nome.trim()}
+            className="px-5 py-2 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+            {saving ? 'Salvando...' : 'Salvar'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -941,15 +1246,48 @@ function TemplatesGerais() {
 
 function AbaMensagens() {
   const toast = useToast()
-  const [trilhas,    setTrilhas]    = useState<TrilhaCadencia[]>([])
-  const [carregando, setCarregando] = useState(true)
+  const [trilhas,       setTrilhas]       = useState<TrilhaCadencia[]>([])
+  const [produtos,      setProdutos]      = useState<Produto[]>([])
+  const [carregando,    setCarregando]    = useState(true)
+  const [modalCriar,    setModalCriar]    = useState(false)
+  const [editandoTrilha,setEditandoTrilha]= useState<TrilhaCadencia | null>(null)
+
+  async function carregarTrilhas() {
+    const r = await cadenciasApi.listaTrilhas()
+    setTrilhas(r.trilhas)
+  }
 
   useEffect(() => {
-    cadenciasApi.listaTrilhas()
-      .then(r => setTrilhas(r.trilhas))
-      .catch(() => toast.error('Erro ao carregar trilhas.'))
+    Promise.all([cadenciasApi.listaTrilhas(), produtosApi.list()])
+      .then(([r, prods]) => { setTrilhas(r.trilhas); setProdutos(prods) })
+      .catch(() => toast.error('Erro ao carregar dados.'))
       .finally(() => setCarregando(false))
   }, [])
+
+  async function handleCriarTrilha(data: Parameters<typeof cadenciasApi.criarTrilha>[0]) {
+    await cadenciasApi.criarTrilha(data)
+    toast.success('Trilha criada!')
+    setModalCriar(false)
+    await carregarTrilhas()
+  }
+
+  async function handleEditarTrilha(id: string, data: Parameters<typeof cadenciasApi.editarTrilha>[1]) {
+    await cadenciasApi.editarTrilha(id, data)
+    toast.success('Trilha atualizada!')
+    setEditandoTrilha(null)
+    await carregarTrilhas()
+  }
+
+  async function handleExcluirTrilha(trilha: TrilhaCadencia) {
+    if (!window.confirm(`Excluir a trilha "${trilha.nome}"? Esta ação não pode ser desfeita.`)) return
+    try {
+      await cadenciasApi.excluirTrilha(trilha.id)
+      toast.success('Trilha excluída.')
+      await carregarTrilhas()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error ?? 'Erro ao excluir trilha.')
+    }
+  }
 
   const ativo      = trilhas.filter(t => !t.tipo_pipeline || t.tipo_pipeline === 'ativo')
   const reativacao = trilhas.filter(t => t.tipo_pipeline === 'reativacao')
@@ -965,20 +1303,39 @@ function AbaMensagens() {
     <div className="space-y-8">
 
       {/* ── Fluxo Ativo ── */}
-      {ativo.length > 0 && (
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <svg className="w-4 h-4 text-amber-500" fill="currentColor" viewBox="0 0 24 24">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <svg className="w-4 h-4 text-amber-500" fill="currentColor" viewBox="0 0 24 24">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-widest">Fluxo Ativo</h2>
+          <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{ativo.length} trilha{ativo.length !== 1 ? 's' : ''}</span>
+          <button
+            onClick={() => setModalCriar(true)}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold rounded-lg transition-colors"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
             </svg>
-            <h2 className="text-sm font-bold text-gray-700 uppercase tracking-widest">Fluxo Ativo</h2>
-            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{ativo.length} trilha{ativo.length !== 1 ? 's' : ''}</span>
-          </div>
-          <div className="space-y-2">
-            {ativo.map(t => <AcordaoTrilha key={t.id} trilha={t} />)}
-          </div>
+            Nova trilha
+          </button>
         </div>
-      )}
+        {ativo.length > 0 ? (
+          <div className="space-y-2">
+            {ativo.map(t => (
+              <AcordaoTrilha
+                key={t.id} trilha={t}
+                onEditar={setEditandoTrilha}
+                onExcluir={handleExcluirTrilha}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-gray-200 px-6 py-8 text-center">
+            <p className="text-gray-400 text-sm">Nenhuma trilha de Fluxo Ativo ainda.</p>
+          </div>
+        )}
+      </div>
 
       {/* ── Reativação ── */}
       {reativacao.length > 0 && (
@@ -991,14 +1348,14 @@ function AbaMensagens() {
             <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{reativacao.length} trilha{reativacao.length !== 1 ? 's' : ''}</span>
           </div>
           <div className="space-y-2">
-            {reativacao.map(t => <AcordaoTrilha key={t.id} trilha={t} />)}
+            {reativacao.map(t => (
+              <AcordaoTrilha
+                key={t.id} trilha={t}
+                onEditar={setEditandoTrilha}
+                onExcluir={handleExcluirTrilha}
+              />
+            ))}
           </div>
-        </div>
-      )}
-
-      {trilhas.length === 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 px-6 py-12 text-center">
-          <p className="text-gray-400 text-sm">Nenhuma trilha cadastrada ainda.</p>
         </div>
       )}
 
@@ -1006,6 +1363,22 @@ function AbaMensagens() {
       <div className="border-t border-gray-200 pt-6">
         <TemplatesGerais />
       </div>
+
+      {modalCriar && (
+        <ModalCriarTrilha
+          produtos={produtos}
+          onSave={handleCriarTrilha}
+          onClose={() => setModalCriar(false)}
+        />
+      )}
+      {editandoTrilha && (
+        <ModalEditarTrilha
+          trilha={editandoTrilha}
+          produtos={produtos}
+          onSave={handleEditarTrilha}
+          onClose={() => setEditandoTrilha(null)}
+        />
+      )}
     </div>
   )
 }

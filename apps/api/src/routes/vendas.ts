@@ -5,6 +5,17 @@ export const vendasRouter = Router()
 
 // ── Helper: monta condições WHERE reutilizáveis ────────────────────────────
 
+// APPROVED incluído apenas para transações dos últimos 7 dias (ainda podem completar).
+// Transações APPROVED mais antigas provavelmente não vão completar e inflariam os totais.
+const STATUS_RECENTE = `(
+  co.status IN ('COMPLETE', 'COMPLETED')
+  OR (
+    co.status = 'APPROVED'
+    AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date
+          > (NOW() AT TIME ZONE 'America/Sao_Paulo')::date - INTERVAL '7 days'
+  )
+)`
+
 function buildWhere(
   inicio: string,
   fim: string,
@@ -13,7 +24,7 @@ function buildWhere(
   startAt = 1,
 ) {
   const conds: string[] = [
-    `co.status IN ('COMPLETE', 'APPROVED')`,
+    STATUS_RECENTE,
     `(co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $${startAt}::date`,
     `(co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $${startAt + 1}::date`,
   ]
@@ -36,6 +47,14 @@ const FROM_JOIN = `
   JOIN clientes c ON c.id = co.cliente_id
   JOIN produtos p ON p.id = co.produto_id
 `
+
+// ── Helpers de timezone ────────────────────────────────────────────────────
+// O banco armazena timestamps em UTC. Compara no timezone do Brasil para que
+// vendas feitas entre 00:00-03:00 BRT (03:00-06:00 UTC) apareçam como "hoje".
+const TZ        = `'America/Sao_Paulo'`
+const HOJE_BRT  = `(NOW() AT TIME ZONE ${TZ})::date`
+const ONTEM_BRT = `(NOW() AT TIME ZONE ${TZ})::date - 1`
+const DATA_BRT  = (col: string) => `(${col} AT TIME ZONE ${TZ})::date`
 
 // ── GET /api/vendas ─────────────────────────────────────────────────────────
 
@@ -97,8 +116,8 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
           c.telefone_formatado               AS cliente_telefone,
           p.nome                             AS produto_nome,
           p.tipo                             AS produto_tipo,
-          COALESCE(co.is_order_bump, false)  AS is_order_bump,
-          co.valor::float                    AS valor,
+          COALESCE(co.is_order_bump, false)           AS is_order_bump,
+          COALESCE(co.valor_liquido, co.valor)::float AS valor,
           co.data_compra,
           (${HOJE_BRT} - (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date)::int AS dias_atras
         ${FROM_JOIN}
@@ -134,7 +153,7 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
           COUNT(*)::text                                                                   AS total,
           COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
         ${FROM_JOIN}
-        WHERE co.status IN ('COMPLETE', 'APPROVED')
+        WHERE ${STATUS_RECENTE}
           AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= ${antInicioSql}
           AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= ${antFimSql}
       `, baseParams),
@@ -178,14 +197,6 @@ vendasRouter.get('/', async (req: Request, res: Response) => {
   }
 })
 
-// ── Constante de timezone ──────────────────────────────────────────────────
-// O banco armazena timestamps em UTC. Compara no timezone do Brasil para que
-// vendas feitas entre 00:00-03:00 BRT (03:00-06:00 UTC) apareçam como "hoje".
-const TZ = `'America/Sao_Paulo'`
-const HOJE_BRT  = `(NOW() AT TIME ZONE ${TZ})::date`
-const ONTEM_BRT = `(NOW() AT TIME ZONE ${TZ})::date - 1`
-const DATA_BRT  = (col: string) => `(${col} AT TIME ZONE ${TZ})::date`
-
 // ── GET /api/vendas/hoje ────────────────────────────────────────────────────
 
 vendasRouter.get('/hoje', async (req: Request, res: Response) => {
@@ -207,11 +218,11 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           c.telefone_formatado               AS cliente_telefone,
           p.nome                             AS produto_nome,
           p.tipo                             AS produto_tipo,
-          COALESCE(co.is_order_bump, false)  AS is_order_bump,
-          co.valor::float                    AS valor,
+          COALESCE(co.is_order_bump, false)           AS is_order_bump,
+          COALESCE(co.valor_liquido, co.valor)::float AS valor,
           co.data_compra
         ${FROM_JOIN}
-        WHERE co.status IN ('COMPLETE', 'APPROVED')
+        WHERE ${STATUS_RECENTE}
           AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
         ORDER BY co.data_compra DESC
       `),
@@ -224,7 +235,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
                THEN (SUM(COALESCE(co.valor_liquido, co.valor)::numeric) / COUNT(*))::text
                ELSE '0' END                                                                AS ticket
         ${FROM_JOIN}
-        WHERE co.status IN ('COMPLETE', 'APPROVED')
+        WHERE ${STATUS_RECENTE}
           AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
       `),
 
@@ -233,7 +244,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           COUNT(*)::text                                                                   AS total,
           COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
         ${FROM_JOIN}
-        WHERE co.status IN ('COMPLETE', 'APPROVED')
+        WHERE ${STATUS_RECENTE}
           AND ${DATA_BRT('co.data_compra')} = ${ONTEM_BRT}
       `),
 
@@ -243,7 +254,7 @@ vendasRouter.get('/hoje', async (req: Request, res: Response) => {
           COUNT(*)::text                                                                   AS quantidade,
           COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
         ${FROM_JOIN}
-        WHERE co.status IN ('COMPLETE', 'APPROVED')
+        WHERE ${STATUS_RECENTE}
           AND ${DATA_BRT('co.data_compra')} = ${HOJE_BRT}
         GROUP BY p.nome
         ORDER BY COUNT(*) DESC
@@ -305,7 +316,7 @@ vendasRouter.get('/resumo-diario', async (req: Request, res: Response) => {
         COUNT(*)::text                                                                  AS quantidade,
         COALESCE(SUM(COALESCE(co.valor_liquido, co.valor)::numeric), 0)::text           AS receita
       ${FROM_JOIN}
-      WHERE co.status IN ('COMPLETE', 'APPROVED')
+      WHERE ${STATUS_RECENTE}
         AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
         AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
       GROUP BY (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date, p.nome

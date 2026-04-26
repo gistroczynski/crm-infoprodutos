@@ -15,7 +15,12 @@ const produtoSchema = z.object({
 
 produtosRouter.get('/', async (_req: Request, res: Response) => {
   try {
-    const rows = await query<Produto>('SELECT * FROM produtos ORDER BY nome')
+    const rows = await query<Produto>(`
+      SELECT DISTINCT ON (nome) id, hotmart_id, nome, tipo, preco, ativo, created_at
+      FROM produtos
+      WHERE ativo = true
+      ORDER BY nome, created_at DESC
+    `)
     res.json(rows)
   } catch (err) {
     res.status(500).json({ error: String(err) })

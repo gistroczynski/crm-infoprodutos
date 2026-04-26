@@ -108,7 +108,8 @@ function AbaFunil() {
 
   useEffect(() => {
     Promise.all([produtosApi.list(), configuracoesApi.list()]).then(([prods, configs]) => {
-      setProdutos(prods)
+      const unicos = prods.filter((p, i, self) => i === self.findIndex(t => t.nome === p.nome))
+      setProdutos(unicos)
       const m = Object.fromEntries(configs.map(c => [c.chave, c.valor ?? '']))
       setUpsellId(m['produto_principal_id'] ?? '')
       setValorMaximoOB(m['valor_maximo_order_bump'] ?? '100')

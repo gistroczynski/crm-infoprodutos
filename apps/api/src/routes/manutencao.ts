@@ -1,4 +1,7 @@
 import { Router, Request, Response } from 'express'
+import multer from 'multer'
+import { parse } from 'csv-parse'
+import { Readable } from 'stream'
 import { pool, query, queryOne } from '../db'
 import { hotmartService } from '../services/hotmart'
 
@@ -436,5 +439,198 @@ manutencaoRouter.post('/sincronizar-transaction-ids', async (req: Request, res: 
   } catch (err) {
     console.error('[sincronizar-transaction-ids] Erro:', err)
     res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
+// ── Helpers internos para CSV de manutenção ────────────────────────────────
+
+const uploadManutencao = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } })
+
+function normStr(s: string): string {
+  return s.normalize('NFC').toLowerCase().trim().replace(/\s+/g, ' ')
+}
+
+function normValor(v: string): number | null {
+  if (!v) return null
+  const limpo = v.replace(/R\$\s*/g, '').replace(/[^\d,.]/g, '').trim()
+  if (!limpo) return null
+  const n = parseFloat(limpo.replace(/\./g, '').replace(',', '.'))
+  if (isNaN(n)) return null
+  return (n > 200 && Number.isInteger(n)) ? n / 100 : n
+}
+
+async function parseCsvBuffer(buf: Buffer): Promise<Record<string, string>[]> {
+  let texto: string
+  if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+    texto = buf.toString('utf8').replace(/^﻿/, '')
+  } else {
+    const utf8 = buf.toString('utf8')
+    texto = utf8.includes('�') ? buf.toString('latin1') : utf8.replace(/^﻿/, '')
+  }
+  const primeira = texto.split(/\r?\n/)[0] ?? ''
+  const sep = ((primeira.match(/;/g) ?? []).length >= (primeira.match(/,/g) ?? []).length) ? ';' : ','
+
+  return new Promise((resolve, reject) => {
+    const rows: Record<string, string>[] = []
+    Readable.from([Buffer.from(texto, 'utf8')])
+      .pipe(parse({ columns: true, skip_empty_lines: true, trim: true, delimiter: sep, relax_column_count: true }))
+      .on('data', r => rows.push(r as Record<string, string>))
+      .on('end', () => resolve(rows))
+      .on('error', reject)
+  })
+}
+
+// ── POST /api/manutencao/corrigir-transaction-ids-csv ─────────────────────
+// Recebe CSV da Hotmart, faz match por email + valor_liquido (±R$0,10) nas
+// compras sem hotmart_transaction_id e atualiza o campo. Em seguida remove
+// duplicatas geradas pelo match.
+manutencaoRouter.post('/corrigir-transaction-ids-csv', uploadManutencao.single('arquivo'), async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado. Use o campo "arquivo".' })
+
+  const client = await pool.connect()
+  try {
+    // 1. Parse CSV
+    const rows = await parseCsvBuffer(req.file.buffer)
+    if (rows.length === 0) return res.status(400).json({ error: 'CSV vazio ou sem linhas de dados.' })
+
+    const cabecalhos = Object.keys(rows[0])
+
+    // Detectar colunas relevantes
+    const EMAIL_KEYS = new Set(['email', 'e mail', 'e mail do comprador', 'email do comprador', 'buyer email', 'comprador email'])
+    const TX_KEYS    = new Set([
+      'cod pedido', 'codigo do pedido', 'codigo pedido', 'transaction', 'transaction id',
+      'codigo da transacao', 'código da transação', 'cod transacao', 'numero do pedido',
+      'número do pedido', 'order id', 'pedido', 'ref pedido', 'hotmart transaction id',
+      'id transacao', 'id da transacao',
+    ])
+    const VL_PRIO    = [
+      'faturamento líquido', 'faturamento liquido', 'valor líquido', 'valor liquido',
+      'net revenue', 'net value', 'líquido', 'liquido', 'valor produtor', 'valor recebido',
+    ]
+    const DATA_KEYS  = new Set(['data de venda', 'data da venda', 'data compra', 'data da compra', 'purchase date', 'sale date', 'data'])
+
+    let emailCol: string | null = null
+    let txCol:    string | null = null
+    let vlCol:    string | null = null
+    let dataCol:  string | null = null
+
+    for (const h of cabecalhos) {
+      const n = normStr(h)
+      if (!emailCol && EMAIL_KEYS.has(n)) emailCol = h
+      if (!txCol    && TX_KEYS.has(n))    txCol    = h
+      if (!dataCol  && DATA_KEYS.has(n))  dataCol  = h
+    }
+    for (const alvo of VL_PRIO) {
+      const found = cabecalhos.find(h => normStr(h) === alvo)
+      if (found) { vlCol = found; break }
+    }
+    if (!vlCol && cabecalhos[55]) vlCol = cabecalhos[55] // fallback posicional (Hotmart col 56)
+
+    if (!emailCol) return res.status(400).json({ error: 'Coluna de email não encontrada.', cabecalhos })
+    if (!txCol)    return res.status(400).json({ error: 'Coluna de transaction_id não encontrada.', cabecalhos })
+    if (!vlCol)    return res.status(400).json({ error: 'Coluna de faturamento_liquido não encontrada.', cabecalhos })
+
+    console.log(`[corrigir-tx-ids-csv] emailCol=${emailCol} txCol=${txCol} vlCol=${vlCol} dataCol=${dataCol} linhas=${rows.length}`)
+
+    // 2. Indexar CSV: email → lista de { transaction_id, valor_liquido }
+    interface EntradaCsv { transaction_id: string; valor_liquido: number }
+    const indexCsv = new Map<string, EntradaCsv[]>()
+
+    for (const row of rows) {
+      const email = (row[emailCol] ?? '').trim().toLowerCase()
+      const tx    = (row[txCol]    ?? '').trim()
+      const vl    = normValor(row[vlCol] ?? '')
+      if (!email || !tx || vl === null) continue
+
+      if (!indexCsv.has(email)) indexCsv.set(email, [])
+      indexCsv.get(email)!.push({ transaction_id: tx, valor_liquido: vl })
+    }
+
+    // 3. Buscar compras sem transaction_id no banco
+    const { rows: comprasSemId } = await client.query<{
+      id: string; email: string; valor_liquido: string | null
+    }>(`
+      SELECT co.id, c.email, co.valor_liquido::text
+      FROM compras co
+      JOIN clientes c ON c.id = co.cliente_id
+      WHERE co.hotmart_transaction_id IS NULL
+      ORDER BY co.id
+    `)
+
+    // 4. Fazer match e atualizar em transação
+    await client.query('BEGIN')
+
+    let transactionIdsAtualizados = 0
+    const usados = new Set<string>() // impede reutilizar o mesmo tx_id para compras distintas
+
+    for (const compra of comprasSemId) {
+      if (compra.valor_liquido === null) continue
+      const vlCompra = parseFloat(compra.valor_liquido)
+      if (isNaN(vlCompra)) continue
+
+      const email      = compra.email.toLowerCase().trim()
+      const candidatos = indexCsv.get(email) ?? []
+
+      const match = candidatos.find(c => {
+        const chave = `${email}|${c.transaction_id}`
+        return !usados.has(chave) && Math.abs(c.valor_liquido - vlCompra) <= 0.10
+      })
+      if (!match) continue
+
+      usados.add(`${email}|${match.transaction_id}`)
+      await client.query(
+        `UPDATE compras SET hotmart_transaction_id = $1, updated_at = NOW() WHERE id = $2`,
+        [match.transaction_id, compra.id]
+      )
+      transactionIdsAtualizados++
+    }
+
+    // 5. Remover duplicatas: mantém 1 por transaction_id priorizando COMPLETE > COMPLETED > outros
+    const { rowCount: duplicatasRemovidas } = await client.query(`
+      DELETE FROM compras c1
+      WHERE c1.hotmart_transaction_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM compras c2
+          WHERE c2.hotmart_transaction_id = c1.hotmart_transaction_id
+            AND c2.id != c1.id
+            AND c2.hotmart_transaction_id IS NOT NULL
+        )
+        AND c1.id NOT IN (
+          SELECT DISTINCT ON (hotmart_transaction_id) id
+          FROM compras
+          WHERE hotmart_transaction_id IS NOT NULL
+          ORDER BY hotmart_transaction_id,
+            CASE status
+              WHEN 'COMPLETE'  THEN 1
+              WHEN 'COMPLETED' THEN 2
+              ELSE 3
+            END ASC
+        )
+    `)
+
+    await client.query('COMMIT')
+
+    // 6. Contar compras que ainda ficaram sem ID
+    const { rows: [{ ainda_sem_id }] } = await client.query<{ ainda_sem_id: string }>(
+      `SELECT COUNT(*)::text AS ainda_sem_id FROM compras WHERE hotmart_transaction_id IS NULL`
+    )
+
+    console.log(
+      `[corrigir-tx-ids-csv] atualizados=${transactionIdsAtualizados}` +
+      ` duplicatas_removidas=${duplicatasRemovidas ?? 0}` +
+      ` ainda_sem_id=${ainda_sem_id}`
+    )
+
+    res.json({
+      transaction_ids_atualizados: transactionIdsAtualizados,
+      duplicatas_removidas:        duplicatasRemovidas ?? 0,
+      ainda_sem_id:                Number(ainda_sem_id),
+    })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('[corrigir-transaction-ids-csv] Erro:', err)
+    res.status(500).json({ success: false, error: String(err) })
+  } finally {
+    client.release()
   }
 })

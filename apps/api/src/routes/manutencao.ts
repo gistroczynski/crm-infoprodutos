@@ -450,6 +450,10 @@ function normStr(s: string): string {
   return s.normalize('NFC').toLowerCase().trim().replace(/\s+/g, ' ')
 }
 
+function normSemAcento(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ')
+}
+
 function normValor(v: string): number | null {
   if (!v) return null
   const limpo = v.replace(/R\$\s*/g, '').replace(/[^\d,.]/g, '').trim()
@@ -497,12 +501,12 @@ manutencaoRouter.post('/corrigir-transaction-ids-csv', uploadManutencao.single('
 
     // Detectar colunas relevantes
     const EMAIL_KEYS = new Set(['email', 'e mail', 'e mail do comprador', 'email do comprador', 'buyer email', 'comprador email'])
-    const TX_KEYS    = new Set([
-      'cod pedido', 'codigo do pedido', 'codigo pedido', 'transaction', 'transaction id',
-      'codigo da transacao', 'código da transação', 'cod transacao', 'numero do pedido',
-      'número do pedido', 'order id', 'pedido', 'ref pedido', 'hotmart transaction id',
-      'id transacao', 'id da transacao',
-    ])
+    const MAPA_TRANSACTION_ID = [
+      'transacao', 'transaction_id', 'transaction', 'transaction id',
+      'cod transacao', 'codigo transacao', 'cod pedido', 'codigo do pedido', 'codigo pedido',
+      'numero do pedido', 'order id', 'pedido', 'ref pedido',
+      'hotmart transaction id', 'id transacao', 'id da transacao',
+    ]
     const VL_PRIO    = [
       'faturamento líquido', 'faturamento liquido', 'valor líquido', 'valor liquido',
       'net revenue', 'net value', 'líquido', 'liquido', 'valor produtor', 'valor recebido',
@@ -517,9 +521,9 @@ manutencaoRouter.post('/corrigir-transaction-ids-csv', uploadManutencao.single('
     for (const h of cabecalhos) {
       const n = normStr(h)
       if (!emailCol && EMAIL_KEYS.has(n)) emailCol = h
-      if (!txCol    && TX_KEYS.has(n))    txCol    = h
       if (!dataCol  && DATA_KEYS.has(n))  dataCol  = h
     }
+    txCol = cabecalhos.find(h => MAPA_TRANSACTION_ID.includes(normSemAcento(h))) ?? null
     for (const alvo of VL_PRIO) {
       const found = cabecalhos.find(h => normStr(h) === alvo)
       if (found) { vlCol = found; break }

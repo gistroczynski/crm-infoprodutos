@@ -33,7 +33,7 @@ relatoriosRouter.get('/ascensao', async (req: Request, res: Response) => {
   try {
     const { inicio, fim } = parseDateRange(req)
 
-    const [totais, tempoMedio, porSemana] = await Promise.all([
+    const [totais, tempoMedio, base, semUpsell, porSemana] = await Promise.all([
 
       // Clientes no período + novos ascendidos
       queryOne<{ total_clientes_periodo: number; novos_ascendidos: number }>(`
@@ -74,6 +74,21 @@ relatoriosRouter.get('/ascensao', async (req: Request, res: Response) => {
         ) sub
       `, [inicio, fim]),
 
+      // Total de clientes na base (sem filtro de período)
+      queryOne<{ total: number }>(`SELECT COUNT(*)::int AS total FROM clientes`),
+
+      // Clientes que nunca compraram o produto principal (potencial de upsell)
+      queryOne<{ sem_upsell: number }>(`
+        SELECT COUNT(DISTINCT c.id)::int AS sem_upsell
+        FROM clientes c
+        WHERE NOT EXISTS (
+          SELECT 1 FROM compras co
+          JOIN produtos p ON p.id = co.produto_id AND p.tipo = 'principal'
+          WHERE co.cliente_id = c.id
+            AND co.status IN ('COMPLETE', 'COMPLETED', 'APPROVED')
+        )
+      `),
+
       // Ascensões agrupadas por semana
       query<{ semana: string; quantidade: number }>(`
         SELECT
@@ -96,6 +111,8 @@ relatoriosRouter.get('/ascensao', async (req: Request, res: Response) => {
       : 0
 
     res.json({
+      total_clientes_base:        base?.total ?? 0,
+      clientes_sem_upsell:        semUpsell?.sem_upsell ?? 0,
       total_clientes_periodo:     totalClientes,
       novos_ascendidos:           novosAscendidos,
       taxa_ascensao:              taxaAscensao,

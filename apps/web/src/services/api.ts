@@ -152,6 +152,8 @@ export const dashboardApi = {
 // ── Relatórios ────────────────────────────────────────────────────────────
 
 export interface RelatorioAscensao {
+  total_clientes_base: number
+  clientes_sem_upsell: number
   total_clientes_periodo: number
   novos_ascendidos: number
   taxa_ascensao: number

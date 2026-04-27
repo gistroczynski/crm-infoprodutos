@@ -565,6 +565,7 @@ manutencaoRouter.post('/corrigir-transaction-ids-csv', uploadManutencao.single('
     await client.query('BEGIN')
 
     let transactionIdsAtualizados = 0
+    let duplicatasRemovidas       = 0
     const usados = new Set<string>() // impede reutilizar o mesmo tx_id para compras distintas
 
     for (const compra of comprasSemId) {
@@ -582,15 +583,28 @@ manutencaoRouter.post('/corrigir-transaction-ids-csv', uploadManutencao.single('
       if (!match) continue
 
       usados.add(`${email}|${match.transaction_id}`)
-      await client.query(
-        `UPDATE compras SET hotmart_transaction_id = $1, updated_at = NOW() WHERE id = $2`,
-        [match.transaction_id, compra.id]
+
+      // Verifica se o transaction_id já existe no banco antes de atribuir
+      const { rows: jaExiste } = await client.query<{ id: string }>(
+        'SELECT id FROM compras WHERE hotmart_transaction_id = $1 LIMIT 1',
+        [match.transaction_id]
       )
-      transactionIdsAtualizados++
+
+      if (jaExiste.length > 0) {
+        // TX já pertence a outra compra → a sem-ID é duplicata, remove
+        await client.query('DELETE FROM compras WHERE id = $1', [compra.id])
+        duplicatasRemovidas++
+      } else {
+        await client.query(
+          'UPDATE compras SET hotmart_transaction_id = $1, updated_at = NOW() WHERE id = $2',
+          [match.transaction_id, compra.id]
+        )
+        transactionIdsAtualizados++
+      }
     }
 
-    // 5. Remover duplicatas: mantém 1 por transaction_id priorizando COMPLETE > COMPLETED > outros
-    const { rowCount: duplicatasRemovidas } = await client.query(`
+    // 5. Remover duplicatas residuais: mantém 1 por transaction_id priorizando COMPLETE > COMPLETED > outros
+    const { rowCount: duplicatasResiduais } = await client.query(`
       DELETE FROM compras c1
       WHERE c1.hotmart_transaction_id IS NOT NULL
         AND EXISTS (
@@ -611,6 +625,8 @@ manutencaoRouter.post('/corrigir-transaction-ids-csv', uploadManutencao.single('
             END ASC
         )
     `)
+
+    duplicatasRemovidas += duplicatasResiduais ?? 0
 
     await client.query('COMMIT')
 

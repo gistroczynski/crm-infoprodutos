@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express'
-import { pool, queryOne } from '../db'
+import { pool, query, queryOne } from '../db'
+import { hotmartService } from '../services/hotmart'
 
 export const manutencaoRouter = Router()
 
@@ -303,6 +304,137 @@ manutencaoRouter.get('/status-duplicatas', async (_req: Request, res: Response) 
         (porTransaction?.linhas_extras ?? 0) + (porData?.linhas_extras ?? 0),
     })
   } catch (err) {
+    res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
+// ── POST /api/manutencao/sincronizar-transaction-ids ──────────────────────
+// Para cada compra sem hotmart_transaction_id, busca na API da Hotmart pelo
+// email do cliente + data da compra. Se encontrar → atualiza o campo.
+// Isso permite que o DISTINCT ON das queries de receita deduplique corretamente.
+//
+// Query params opcionais: ?inicio=2026-04-01&fim=2026-04-30
+// Por padrão processa todos os meses com compras sem ID.
+manutencaoRouter.post('/sincronizar-transaction-ids', async (req: Request, res: Response) => {
+  try {
+    const inicioPar = req.query.inicio as string | undefined
+    const fimPar    = req.query.fim    as string | undefined
+
+    // 1. Busca compras sem transaction_id
+    const whereExtra: string[] = []
+    const params: unknown[] = []
+    if (inicioPar) {
+      params.push(inicioPar)
+      whereExtra.push(`(co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $${params.length}::date`)
+    }
+    if (fimPar) {
+      params.push(fimPar)
+      whereExtra.push(`(co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $${params.length}::date`)
+    }
+    const extraWhere = whereExtra.length ? `AND ${whereExtra.join(' AND ')}` : ''
+
+    const compras = await query<{
+      id: string; email: string; produto_nome: string; data_compra: string; valor: number | null
+    }>(`
+      SELECT
+        co.id,
+        c.email,
+        p.nome                                                         AS produto_nome,
+        (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date::text AS data_compra,
+        co.valor::float                                                AS valor
+      FROM compras co
+      JOIN clientes c ON c.id = co.cliente_id
+      JOIN produtos p ON p.id = co.produto_id
+      WHERE co.hotmart_transaction_id IS NULL
+        ${extraWhere}
+      ORDER BY co.data_compra
+    `, params)
+
+    if (compras.length === 0) {
+      return res.json({ success: true, total: 0, atualizadas: 0, sem_match: 0, mensagem: 'Nenhuma compra sem transaction_id.' })
+    }
+
+    // 2. Descobre meses únicos para buscar na Hotmart com o mínimo de chamadas
+    const mesesSet = new Set<string>()
+    for (const c of compras) mesesSet.add(c.data_compra.slice(0, 7))
+
+    // 3. Busca todas as vendas Hotmart por mês e indexa por email+data
+    const fmt = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' })
+    type TxInfo = { transaction: string; produto_nome: string }
+    // chave: `email|YYYY-MM-DD`  →  lista de transações nesse dia
+    const indexEmailData = new Map<string, TxInfo[]>()
+
+    for (const mes of [...mesesSet].sort()) {
+      const inicioMs = new Date(mes + '-01T00:00:00Z').getTime()
+      const fimDate  = new Date(mes + '-01T00:00:00Z')
+      fimDate.setUTCMonth(fimDate.getUTCMonth() + 1)
+      fimDate.setUTCDate(0)
+      fimDate.setUTCHours(23, 59, 59, 999)
+      const fimMs = fimDate.getTime()
+
+      console.log(`[sincronizar-tx-ids] Buscando Hotmart ${mes}...`)
+      const itens = await hotmartService.buscarVendasPorPeriodo(inicioMs, fimMs)
+
+      for (const item of itens) {
+        const emailKey = item.buyer.email.toLowerCase().trim()
+        const dataBRT  = fmt.format(new Date(item.purchase.order_date))
+        const chave    = `${emailKey}|${dataBRT}`
+        if (!indexEmailData.has(chave)) indexEmailData.set(chave, [])
+        indexEmailData.get(chave)!.push({
+          transaction:  item.purchase.transaction,
+          produto_nome: item.product.name,
+        })
+      }
+    }
+
+    // 4. Tenta fazer match e atualizar cada compra
+    let atualizadas = 0
+    let semMatch    = 0
+    const detalhes: Array<{
+      id: string; email: string; produto: string; data: string
+      transaction_id: string | null; match: boolean; motivo?: string
+    }> = []
+
+    for (const compra of compras) {
+      const chave = `${compra.email.toLowerCase()}|${compra.data_compra}`
+      const candidatos = indexEmailData.get(chave) ?? []
+
+      let escolhido: TxInfo | undefined
+
+      if (candidatos.length === 1) {
+        // Match único por email + data — sem ambiguidade
+        escolhido = candidatos[0]
+      } else if (candidatos.length > 1) {
+        // Desempata pelo nome do produto (normalizado)
+        const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+        const normProduto = norm(compra.produto_nome)
+        escolhido = candidatos.find(c => norm(c.produto_nome).includes(normProduto) || normProduto.includes(norm(c.produto_nome)))
+        if (!escolhido) escolhido = candidatos[0] // fallback: primeiro candidato
+      }
+
+      if (escolhido) {
+        await pool.query(
+          `UPDATE compras SET hotmart_transaction_id = $1, updated_at = NOW() WHERE id = $2`,
+          [escolhido.transaction, compra.id]
+        )
+        atualizadas++
+        detalhes.push({ id: compra.id, email: compra.email, produto: compra.produto_nome, data: compra.data_compra, transaction_id: escolhido.transaction, match: true })
+      } else {
+        semMatch++
+        detalhes.push({ id: compra.id, email: compra.email, produto: compra.produto_nome, data: compra.data_compra, transaction_id: null, match: false, motivo: 'email+data não encontrados na API Hotmart' })
+      }
+    }
+
+    res.json({
+      success:    true,
+      total:      compras.length,
+      atualizadas,
+      sem_match:  semMatch,
+      meses_consultados: [...mesesSet].sort(),
+      detalhes,
+    })
+  } catch (err) {
+    console.error('[sincronizar-transaction-ids] Erro:', err)
     res.status(500).json({ success: false, error: String(err) })
   }
 })

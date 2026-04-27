@@ -678,6 +678,53 @@ debugRouter.get('/compras-duplicadas/:clienteId', async (req: Request, res: Resp
   }
 })
 
+// ── GET /api/debug/compras-sem-id-abril ──────────────────────────────────
+// Lista compras sem hotmart_transaction_id para um mês específico.
+// Query param: ?mes=2026-04 (padrão: mês corrente)
+debugRouter.get('/compras-sem-id-abril', async (req: Request, res: Response) => {
+  try {
+    const mes = (req.query.mes as string) || new Date().toISOString().slice(0, 7)
+    const inicio = `${mes}-01`
+    const fim    = new Date(mes + '-01T12:00:00Z')
+    fim.setUTCMonth(fim.getUTCMonth() + 1)
+    fim.setUTCDate(0)
+    const fimStr = fim.toISOString().slice(0, 10)
+
+    const compras = await query<{
+      id: string; email: string; produto: string
+      valor: number | null; valor_liquido: number | null
+      status: string; data_compra: string
+    }>(`
+      SELECT
+        co.id,
+        c.email,
+        p.nome                                                              AS produto,
+        co.valor::float                                                     AS valor,
+        co.valor_liquido::float                                             AS valor_liquido,
+        co.status,
+        (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date::text      AS data_compra
+      FROM compras co
+      JOIN clientes c ON c.id = co.cliente_id
+      JOIN produtos p ON p.id = co.produto_id
+      WHERE co.hotmart_transaction_id IS NULL
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date >= $1::date
+        AND (co.data_compra AT TIME ZONE 'America/Sao_Paulo')::date <= $2::date
+      ORDER BY co.data_compra, c.email
+    `, [inicio, fimStr])
+
+    const totalReceita = compras.reduce((s, c) => s + (c.valor_liquido ?? c.valor ?? 0), 0)
+
+    res.json({
+      mes,
+      total:   compras.length,
+      receita: Math.round(totalReceita * 100) / 100,
+      compras,
+    })
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
 // ── GET /api/debug/compras-sample ─────────────────────────────────────────
 // Mostra as 10 compras mais recentes com todos os campos de order bump
 debugRouter.get('/compras-sample', async (_req: Request, res: Response) => {

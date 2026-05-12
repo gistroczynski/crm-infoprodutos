@@ -11,12 +11,14 @@ const produtoSchema = z.object({
   preco: z.number().positive(),
   hotmart_id: z.string().optional(),
   ativo: z.boolean().optional(),
+  entrega_fisica: z.boolean().optional(),
 })
 
 produtosRouter.get('/', async (_req: Request, res: Response) => {
   try {
     const rows = await query<Produto>(`
-      SELECT DISTINCT ON (nome) id, hotmart_id, nome, tipo, preco, ativo, created_at
+      SELECT DISTINCT ON (nome) id, hotmart_id, nome, tipo, preco, ativo,
+             COALESCE(entrega_fisica, false) AS entrega_fisica, created_at
       FROM produtos
       WHERE ativo = true
       ORDER BY nome, created_at DESC

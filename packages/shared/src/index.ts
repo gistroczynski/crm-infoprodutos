@@ -14,6 +14,7 @@ export interface Produto {
   tipo: ProdutoTipo
   preco: number
   ativo: boolean
+  entrega_fisica: boolean
   created_at: string
 }
 

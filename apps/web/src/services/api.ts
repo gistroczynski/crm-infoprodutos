@@ -110,6 +110,9 @@ export const listaDiariaApi = {
 export const produtosApi = {
   list: () =>
     api.get<Produto[]>('/api/produtos').then(r => r.data),
+
+  setEntregaFisica: (id: string, entrega_fisica: boolean) =>
+    api.patch<Produto>(`/api/produtos/${id}`, { entrega_fisica }).then(r => r.data),
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────

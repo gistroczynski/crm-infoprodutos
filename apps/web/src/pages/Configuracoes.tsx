@@ -98,17 +98,20 @@ function CheckList({
 
 function AbaFunil() {
   const toast = useToast()
-  const [produtos,      setProdutos]      = useState<Produto[]>([])
-  const [upsellId,      setUpsellId]      = useState<string>('')
-  const [entradas,      setEntradas]      = useState<string[]>([])
-  const [valorMaximoOB, setValorMaximoOB] = useState<string>('100')
-  const [loading,       setLoading]       = useState(true)
-  const [saving,        setSaving]        = useState(false)
+  const [produtos,           setProdutos]           = useState<Produto[]>([])
+  const [upsellId,           setUpsellId]           = useState<string>('')
+  const [entradas,           setEntradas]           = useState<string[]>([])
+  const [valorMaximoOB,      setValorMaximoOB]      = useState<string>('100')
+  const [entregaFisicaIds,   setEntregaFisicaIds]   = useState<string[]>([])
+  const [loading,            setLoading]            = useState(true)
+  const [saving,             setSaving]             = useState(false)
+  const [savingFisico,       setSavingFisico]       = useState<string | null>(null)
 
   useEffect(() => {
     Promise.all([produtosApi.list(), configuracoesApi.list()]).then(([prods, configs]) => {
       const unicos = prods.filter((p, i, self) => i === self.findIndex(t => t.nome === p.nome))
       setProdutos(unicos)
+      setEntregaFisicaIds(unicos.filter(p => p.entrega_fisica).map(p => p.id))
       const m = Object.fromEntries(configs.map(c => [c.chave, c.valor ?? '']))
       setUpsellId(m['produto_principal_id'] ?? '')
       setValorMaximoOB(m['valor_maximo_order_bump'] ?? '100')
@@ -118,6 +121,20 @@ function AbaFunil() {
 
   function toggleEntrada(id: string) {
     setEntradas(e => e.includes(id) ? e.filter(x => x !== id) : [...e, id])
+  }
+
+  async function toggleEntregaFisica(id: string) {
+    const novo = !entregaFisicaIds.includes(id)
+    setSavingFisico(id)
+    try {
+      await produtosApi.setEntregaFisica(id, novo)
+      setEntregaFisicaIds(ids => novo ? [...ids, id] : ids.filter(x => x !== id))
+      toast.success(novo ? 'Cadência começa no D+40 (entrega física)' : 'Cadência começa no D+1 (digital)')
+    } catch {
+      toast.error('Erro ao atualizar. Tente novamente.')
+    } finally {
+      setSavingFisico(null)
+    }
   }
 
   async function salvar() {
@@ -184,6 +201,51 @@ function AbaFunil() {
           : <CheckList produtos={produtos} selecionados={entradas} onToggle={toggleEntrada} />
         }
       </div>
+
+      {/* Entrega física (livros) */}
+      {entradas.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-start justify-between mb-1">
+            <h3 className="text-sm font-semibold text-gray-900">Entrega física (livro)</h3>
+            <span className="text-xs text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded-full">D+40</span>
+          </div>
+          <p className="text-xs text-gray-500 mb-4">
+            Livros físicos demoram ~30 dias para chegar. Ative para iniciar a cadência no <strong>D+40</strong> em vez do D+1.
+            E-books e digitais não precisam de delay.
+          </p>
+          <div className="space-y-3">
+            {produtos.filter(p => entradas.includes(p.id)).map(p => {
+              const isFisico = entregaFisicaIds.includes(p.id)
+              const carregando = savingFisico === p.id
+              return (
+                <div key={p.id} className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-gray-700 truncate flex-1">{p.nome}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className={`text-xs font-medium ${isFisico ? 'text-amber-600' : 'text-gray-400'}`}>
+                      {isFisico ? 'Físico · D+40' : 'Digital · D+1'}
+                    </span>
+                    <button
+                      role="switch"
+                      aria-checked={isFisico}
+                      disabled={carregando}
+                      onClick={() => toggleEntregaFisica(p.id)}
+                      className={[
+                        'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50',
+                        isFisico ? 'bg-amber-500' : 'bg-gray-200',
+                      ].join(' ')}
+                    >
+                      <span className={[
+                        'inline-block h-4 w-4 rounded-full bg-white shadow ring-0 transition-transform duration-200',
+                        isFisico ? 'translate-x-4' : 'translate-x-0',
+                      ].join(' ')} />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Valor máximo de order bump */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">

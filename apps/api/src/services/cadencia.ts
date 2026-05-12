@@ -89,13 +89,26 @@ export async function inscreverClienteNaTrilhaAutomaticamente(
     return null
   }
 
-  // Busca etapa 1 para calcular data_proxima_etapa
-  const etapa1 = await queryOne<{ dia_envio: number }>(`
-    SELECT dia_envio FROM etapas_cadencia
-    WHERE trilha_id = $1 AND numero_etapa = 1 AND ativa = true
-  `, [trilha.id])
+  // Busca etapa 1 e verifica se o produto de entrada é físico (livro)
+  const [etapa1, produtoEntrada] = await Promise.all([
+    queryOne<{ dia_envio: number }>(`
+      SELECT dia_envio FROM etapas_cadencia
+      WHERE trilha_id = $1 AND numero_etapa = 1 AND ativa = true
+    `, [trilha.id]),
+    queryOne<{ entrega_fisica: boolean }>(`
+      SELECT COALESCE(p.entrega_fisica, false) AS entrega_fisica
+      FROM trilhas_cadencia t
+      JOIN produtos p ON p.id = t.produto_entrada_id
+      WHERE t.id = $1
+    `, [trilha.id]),
+  ])
 
-  const diasEtapa1 = etapa1?.dia_envio ?? 1
+  const entregaFisica = produtoEntrada?.entrega_fisica ?? false
+  const diasEtapa1 = entregaFisica ? 40 : (etapa1?.dia_envio ?? 1)
+
+  if (entregaFisica) {
+    console.log(`[Cadencia] Produto físico — iniciando cadência no D+40 para cliente ${clienteId}`)
+  }
 
   await pool.query(`
     INSERT INTO clientes_trilha (cliente_id, trilha_id, etapa_atual, data_proxima_etapa)

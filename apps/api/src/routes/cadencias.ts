@@ -357,12 +357,21 @@ cadenciasRouter.post('/clientes-trilha/inscrever', async (req: Request, res: Res
   try {
     const body = inscreverSchema.parse(req.body)
 
-    const etapa1 = await queryOne<{ dia_envio: number }>(`
-      SELECT dia_envio FROM etapas_cadencia
-      WHERE trilha_id = $1 AND numero_etapa = 1 AND ativa = true
-    `, [body.trilha_id])
+    const [etapa1, produtoEntrada] = await Promise.all([
+      queryOne<{ dia_envio: number }>(`
+        SELECT dia_envio FROM etapas_cadencia
+        WHERE trilha_id = $1 AND numero_etapa = 1 AND ativa = true
+      `, [body.trilha_id]),
+      queryOne<{ entrega_fisica: boolean }>(`
+        SELECT COALESCE(p.entrega_fisica, false) AS entrega_fisica
+        FROM trilhas_cadencia t
+        LEFT JOIN produtos p ON p.id = t.produto_entrada_id
+        WHERE t.id = $1
+      `, [body.trilha_id]),
+    ])
 
-    const diasEtapa1 = etapa1?.dia_envio ?? 1
+    const entregaFisica = produtoEntrada?.entrega_fisica ?? false
+    const diasEtapa1 = entregaFisica ? 40 : (etapa1?.dia_envio ?? 1)
 
     const resultado = await queryOne<{ id: string }>(`
       INSERT INTO clientes_trilha (cliente_id, trilha_id, etapa_atual, data_proxima_etapa)
@@ -540,13 +549,20 @@ cadenciasRouter.post('/fluxo-ativo/atualizar-prioridades', async (_req: Request,
     }
 
     if (reinseridos > 0) {
+      // Zera o delay apenas para produtos digitais; livros físicos mantêm o D+40
       await pool.query(`
-        UPDATE clientes_trilha
+        UPDATE clientes_trilha ct
         SET data_proxima_etapa = NOW()
-        WHERE etapa_atual = 1
-          AND status = 'ativo'
-          AND (tipo_pipeline = 'ativo' OR tipo_pipeline IS NULL)
-          AND data_proxima_etapa > NOW()
+        WHERE ct.etapa_atual = 1
+          AND ct.status = 'ativo'
+          AND (ct.tipo_pipeline = 'ativo' OR ct.tipo_pipeline IS NULL)
+          AND ct.data_proxima_etapa > NOW()
+          AND NOT EXISTS (
+            SELECT 1 FROM trilhas_cadencia t
+            JOIN produtos p ON p.id = t.produto_entrada_id
+            WHERE t.id = ct.trilha_id
+              AND COALESCE(p.entrega_fisica, false) = true
+          )
       `)
     }
 

@@ -221,9 +221,10 @@ function AbaFunil() {
                 <div key={p.id} className="flex items-center justify-between gap-3">
                   <span className="text-sm text-gray-700 truncate flex-1">{p.nome}</span>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={`text-xs font-medium ${isFisico ? 'text-amber-600' : 'text-gray-400'}`}>
-                      {isFisico ? 'Físico · D+40' : 'Digital · D+1'}
-                    </span>
+                    {isFisico
+                      ? <span className="text-xs font-semibold bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">📦 Físico</span>
+                      : <span className="text-xs text-gray-400">Digital · D+1</span>
+                    }
                     <button
                       role="switch"
                       aria-checked={isFisico}

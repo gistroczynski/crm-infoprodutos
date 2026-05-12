@@ -89,22 +89,13 @@ export async function inscreverClienteNaTrilhaAutomaticamente(
     return null
   }
 
-  // Busca etapa 1 e verifica se o produto de entrada é físico (livro)
-  const [etapa1, produtoEntrada] = await Promise.all([
-    queryOne<{ dia_envio: number }>(`
-      SELECT dia_envio FROM etapas_cadencia
-      WHERE trilha_id = $1 AND numero_etapa = 1 AND ativa = true
-    `, [trilha.id]),
-    queryOne<{ entrega_fisica: boolean }>(`
-      SELECT COALESCE(p.entrega_fisica, false) AS entrega_fisica
-      FROM trilhas_cadencia t
-      JOIN produtos p ON p.id = t.produto_entrada_id
-      WHERE t.id = $1
-    `, [trilha.id]),
-  ])
-
-  const entregaFisica = produtoEntrada?.entrega_fisica ?? false
-  const diasEtapa1 = entregaFisica ? 40 : (etapa1?.dia_envio ?? 1)
+  // Verifica se o produto comprado é físico (livro) para aplicar delay
+  const produtoInfo = await queryOne<{ entrega_fisica: boolean }>(
+    'SELECT COALESCE(entrega_fisica, false) AS entrega_fisica FROM produtos WHERE id = $1',
+    [produtoId]
+  )
+  const entregaFisica = produtoInfo?.entrega_fisica ?? false
+  const diasDelay = entregaFisica ? 40 : 1
 
   if (entregaFisica) {
     console.log(`[Cadencia] Produto físico — iniciando cadência no D+40 para cliente ${clienteId}`)
@@ -114,7 +105,7 @@ export async function inscreverClienteNaTrilhaAutomaticamente(
     INSERT INTO clientes_trilha (cliente_id, trilha_id, etapa_atual, data_proxima_etapa)
     VALUES ($1, $2, 1, NOW() + ($3 || ' days')::interval)
     ON CONFLICT (cliente_id, trilha_id) DO NOTHING
-  `, [clienteId, trilha.id, diasEtapa1])
+  `, [clienteId, trilha.id, diasDelay])
 
   console.log(`[Cadencia] Cliente ${clienteId} inscrito na trilha ${trilha.id}`)
   return trilha.id

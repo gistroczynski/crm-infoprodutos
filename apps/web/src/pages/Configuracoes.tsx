@@ -601,10 +601,12 @@ function AcordaoTrilha({
   trilha,
   onEditar,
   onExcluir,
+  onInscreverRetroativo,
 }: {
   trilha: TrilhaCadencia
   onEditar: (t: TrilhaCadencia) => void
   onExcluir: (t: TrilhaCadencia) => void
+  onInscreverRetroativo?: (t: TrilhaCadencia) => void
 }) {
   const toast = useToast()
   const [aberto,    setAberto]    = useState(false)
@@ -665,6 +667,15 @@ function AcordaoTrilha({
               <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
           </button>
+          {onInscreverRetroativo && (
+            <button
+              onClick={e => { e.stopPropagation(); onInscreverRetroativo(trilha) }}
+              title="Inscrever compradores antigos"
+              className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg border border-indigo-200 transition-colors"
+            >
+              ↩ Inscrever
+            </button>
+          )}
           <button
             onClick={e => { e.stopPropagation(); onExcluir(trilha) }}
             title="Excluir trilha"
@@ -1308,11 +1319,13 @@ function TemplatesGerais() {
 
 function AbaMensagens() {
   const toast = useToast()
-  const [trilhas,       setTrilhas]       = useState<TrilhaCadencia[]>([])
-  const [produtos,      setProdutos]      = useState<Produto[]>([])
-  const [carregando,    setCarregando]    = useState(true)
-  const [modalCriar,    setModalCriar]    = useState(false)
-  const [editandoTrilha,setEditandoTrilha]= useState<TrilhaCadencia | null>(null)
+  const [trilhas,           setTrilhas]           = useState<TrilhaCadencia[]>([])
+  const [produtos,          setProdutos]          = useState<Produto[]>([])
+  const [carregando,        setCarregando]        = useState(true)
+  const [modalCriar,        setModalCriar]        = useState(false)
+  const [editandoTrilha,    setEditandoTrilha]    = useState<TrilhaCadencia | null>(null)
+  const [modalRetroativo,   setModalRetroativo]   = useState<TrilhaCadencia | null>(null)
+  const [inscrevendo,       setInscrevendo]       = useState(false)
 
   async function carregarTrilhas() {
     const r = await cadenciasApi.listaTrilhas()
@@ -1338,6 +1351,22 @@ function AbaMensagens() {
     toast.success('Trilha atualizada!')
     setEditandoTrilha(null)
     await carregarTrilhas()
+  }
+
+  async function handleInscreverRetroativo(trilha: TrilhaCadencia) {
+    setModalRetroativo(null)
+    setInscrevendo(true)
+    try {
+      const r = await cadenciasApi.inscreverRetroativo(trilha.id)
+      const partes: string[] = []
+      if (r.inscritos > 0)      partes.push(`${r.inscritos} cliente${r.inscritos !== 1 ? 's' : ''} inscritos no Fluxo Ativo`)
+      if (r.muito_antigos > 0)  partes.push(`${r.muito_antigos} adicionados à Reativação`)
+      toast.success(partes.join(' | ') || 'Nenhum cliente novo para inscrever.')
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error ?? 'Erro ao inscrever compradores.')
+    } finally {
+      setInscrevendo(false)
+    }
   }
 
   async function handleExcluirTrilha(trilha: TrilhaCadencia) {
@@ -1389,6 +1418,7 @@ function AbaMensagens() {
                 key={t.id} trilha={t}
                 onEditar={setEditandoTrilha}
                 onExcluir={handleExcluirTrilha}
+                onInscreverRetroativo={setModalRetroativo}
               />
             ))}
           </div>
@@ -1440,6 +1470,40 @@ function AbaMensagens() {
           onSave={handleEditarTrilha}
           onClose={() => setEditandoTrilha(null)}
         />
+      )}
+
+      {/* Modal: inscrever compradores antigos */}
+      {modalRetroativo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-base font-bold text-gray-900 mb-2">Inscrever compradores antigos</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Isso vai inscrever todos os compradores anteriores de{' '}
+              <strong>{modalRetroativo.produto_entrada ?? modalRetroativo.nome}</strong>{' '}
+              que ainda não estão nessa trilha.
+            </p>
+            <div className="bg-gray-50 rounded-lg p-3 mb-4 space-y-1.5 text-sm text-gray-600">
+              <p>Compradores recentes (até 30 dias) entram no <strong>Fluxo Ativo</strong> na etapa correta.</p>
+              <p>Compradores mais antigos (+30 dias) entram na fila de <strong>Reativação</strong>.</p>
+            </div>
+            <p className="text-sm font-semibold text-gray-800 mb-4">Continuar?</p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setModalRetroativo(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleInscreverRetroativo(modalRetroativo)}
+                disabled={inscrevendo}
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-lg transition-colors"
+              >
+                {inscrevendo ? 'Inscrevendo...' : 'Sim, inscrever'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

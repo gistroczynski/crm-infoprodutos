@@ -500,6 +500,18 @@ export const cadenciasApi = {
 
   excluirTrilha: (id: string) =>
     api.delete<{ success: boolean }>(`/api/cadencias/trilhas/${id}`).then(r => r.data),
+
+  inscreverRetroativo: (trilhaId: string) =>
+    api.post<{
+      success: boolean
+      total_compradores: number
+      inscritos: number
+      ja_na_trilha: number
+      sem_telefone: number
+      muito_antigos: number
+      reativacao_adicionados: number
+      detalhes: Array<{ nome: string; email: string; dias_desde_compra: number; etapa_inscrita: number }>
+    }>(`/api/cadencias/trilhas/${trilhaId}/inscrever-retroativo`).then(r => r.data),
 }
 
 // ── Fluxo Ativo ───────────────────────────────────────────────────────────

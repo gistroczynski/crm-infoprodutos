@@ -630,6 +630,137 @@ cadenciasRouter.post('/fluxo-ativo/atualizar-prioridades', async (_req: Request,
   }
 })
 
+// ── POST /api/cadencias/trilhas/:trilhaId/inscrever-retroativo ───────────
+// Inscreve compradores antigos de um produto que ainda não estão na trilha.
+// Recentes (≤30 dias) → Fluxo Ativo na etapa correta.
+// Antigos (>30 dias) → fila de Reativação via popularFilaReativacao().
+cadenciasRouter.post('/trilhas/:trilhaId/inscrever-retroativo', async (req: Request, res: Response) => {
+  try {
+    const { trilhaId } = req.params
+
+    // 1. Valida trilha e produto de entrada
+    const trilha = await queryOne<{ produto_entrada_id: string | null; nome: string }>(
+      `SELECT produto_entrada_id, nome FROM trilhas_cadencia WHERE id = $1 AND ativa = true`,
+      [trilhaId]
+    )
+    if (!trilha) return res.status(404).json({ success: false, error: 'Trilha não encontrada.' })
+    if (!trilha.produto_entrada_id) {
+      return res.status(400).json({ success: false, error: 'Trilha sem produto de entrada configurado.' })
+    }
+
+    // 2. Etapas da trilha ordenadas
+    const etapas = await query<{ numero_etapa: number }>(
+      `SELECT numero_etapa FROM etapas_cadencia WHERE trilha_id = $1 AND ativa = true ORDER BY numero_etapa ASC`,
+      [trilhaId]
+    )
+    if (etapas.length === 0) {
+      return res.status(400).json({ success: false, error: 'Trilha sem etapas ativas.' })
+    }
+
+    // 3. Compradores elegíveis: compraram o produto, não compraram upsell, não estão nessa trilha
+    const compradores = await query<{
+      cliente_id: string
+      nome: string
+      email: string
+      telefone_valido: boolean
+      dias_desde_compra: number
+    }>(`
+      SELECT
+        c.id                                                          AS cliente_id,
+        c.nome,
+        c.email,
+        c.telefone_valido,
+        EXTRACT(DAY FROM NOW() - MAX(co.data_compra))::int            AS dias_desde_compra
+      FROM clientes c
+      JOIN compras co ON co.cliente_id = c.id
+        AND co.produto_id = $1
+        AND co.status IN ('COMPLETE', 'APPROVED', 'COMPLETED')
+      WHERE
+        -- Não comprou produto principal (upsell)
+        NOT EXISTS (
+          SELECT 1 FROM compras co2
+          JOIN produtos p2 ON p2.id = co2.produto_id
+          WHERE co2.cliente_id = c.id
+            AND co2.status IN ('COMPLETE', 'APPROVED', 'COMPLETED')
+            AND (p2.tipo = 'principal' OR p2.nome ILIKE '%Conduta Masculina%')
+        )
+        -- Não está inscrito nessa trilha (qualquer status)
+        AND NOT EXISTS (
+          SELECT 1 FROM clientes_trilha ct
+          WHERE ct.cliente_id = c.id AND ct.trilha_id = $2
+        )
+      GROUP BY c.id, c.nome, c.email, c.telefone_valido
+      ORDER BY MAX(co.data_compra) DESC
+    `, [trilha.produto_entrada_id, trilhaId])
+
+    // 4. Mapeamento de dias → número de etapa (independente da trilha)
+    function diasParaNumEtapa(dias: number): number | null {
+      if (dias <= 3)  return 1
+      if (dias <= 7)  return 2
+      if (dias <= 14) return 3
+      if (dias <= 21) return 4
+      if (dias <= 30) return 5
+      return null
+    }
+
+    // Clampa ao número de etapas disponíveis na trilha
+    const maxEtapa = etapas[etapas.length - 1].numero_etapa
+    function resolverEtapa(dias: number): number | null {
+      const n = diasParaNumEtapa(dias)
+      if (n === null) return null
+      return Math.min(n, maxEtapa)
+    }
+
+    // 5. Inscreve cada cliente elegível
+    let inscritos    = 0
+    let ja_na_trilha = 0
+    let sem_telefone = 0
+    let muito_antigos = 0
+    const detalhes: Array<{ nome: string; email: string; dias_desde_compra: number; etapa_inscrita: number }> = []
+
+    for (const c of compradores) {
+      if (!c.telefone_valido) { sem_telefone++; continue }
+
+      const etapaNum = resolverEtapa(c.dias_desde_compra)
+      if (etapaNum === null) { muito_antigos++; continue }
+
+      const resultado = await pool.query(`
+        INSERT INTO clientes_trilha (cliente_id, trilha_id, etapa_atual, data_proxima_etapa, tipo_pipeline)
+        VALUES ($1, $2, $3, NOW(), 'ativo')
+        ON CONFLICT (cliente_id, trilha_id) DO NOTHING
+        RETURNING id
+      `, [c.cliente_id, trilhaId, etapaNum])
+
+      if ((resultado.rowCount ?? 0) > 0) {
+        inscritos++
+        detalhes.push({ nome: c.nome, email: c.email, dias_desde_compra: c.dias_desde_compra, etapa_inscrita: etapaNum })
+      } else {
+        ja_na_trilha++
+      }
+    }
+
+    // 6. Compradores muito antigos → fila de reativação
+    let reativacao_adicionados = 0
+    if (muito_antigos > 0) {
+      const r = await popularFilaReativacao()
+      reativacao_adicionados = r.adicionados
+    }
+
+    res.json({
+      success: true,
+      total_compradores: compradores.length,
+      inscritos,
+      ja_na_trilha,
+      sem_telefone,
+      muito_antigos,
+      reativacao_adicionados,
+      detalhes,
+    })
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) })
+  }
+})
+
 // ── POST /api/cadencias/reativacao/atualizar-prioridades ─────────────────
 cadenciasRouter.post('/reativacao/atualizar-prioridades', async (_req: Request, res: Response) => {
   try {

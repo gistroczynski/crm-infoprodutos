@@ -107,11 +107,21 @@ function CardFluxoAtivo({
           </div>
         </div>
 
-        {/* Produto + dias na trilha */}
+        {/* Produto + data da compra + dias na trilha */}
         <div className="flex items-center gap-3 mb-3 text-xs text-gray-500">
           <span className="truncate max-w-[200px]" title={item.produto_entrada}>
             📦 {item.produto_entrada || '—'}
           </span>
+          {item.data_compra_entrada && (
+            <span className="flex-shrink-0">
+              📅 Comprou em {new Date(item.data_compra_entrada).toLocaleDateString('pt-BR', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+                timeZone: 'America/Sao_Paulo',
+              })}
+            </span>
+          )}
           <span className="flex-shrink-0">🕐 {item.dias_na_trilha}d na trilha</span>
         </div>
 

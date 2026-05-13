@@ -163,7 +163,9 @@ export async function buscarListaDoDia(): Promise<ItemListaDia[]> {
   `)
 
   return rows.map(r => {
-    const msg = r.mensagem_whatsapp.replace(/\{nome\}/g, r.cliente_nome.split(' ')[0])
+    const msg = r.mensagem_whatsapp
+      .replace(/\{nome\}/g, r.cliente_nome.split(' ')[0])
+      .replace(/\{produto\}/g, r.produto_entrada)
     const link = r.cliente_telefone
       ? `https://wa.me/${r.cliente_telefone}?text=${encodeURIComponent(msg)}`
       : null

@@ -479,6 +479,7 @@ cadenciasRouter.get('/fluxo-ativo', async (req: Request, res: Response) => {
         mensagem_whatsapp: string
         dias_na_trilha: number
         status: string
+        data_compra_entrada: string | null
       }>(`
         SELECT
           ct.id,
@@ -497,7 +498,12 @@ cadenciasRouter.get('/fluxo-ativo', async (req: Request, res: Response) => {
           e.nome                           AS nome_etapa,
           e.mensagem_whatsapp,
           EXTRACT(DAY FROM NOW() - ct.data_entrada)::int AS dias_na_trilha,
-          ct.status
+          ct.status,
+          (SELECT co.data_compra FROM compras co
+           WHERE co.cliente_id = ct.cliente_id
+             AND co.produto_id = t.produto_entrada_id
+           ORDER BY co.data_compra DESC
+           LIMIT 1)                        AS data_compra_entrada
         FROM clientes_trilha ct
         JOIN clientes c           ON c.id = ct.cliente_id
         JOIN trilhas_cadencia t   ON t.id = ct.trilha_id
@@ -554,11 +560,13 @@ cadenciasRouter.get('/fluxo-ativo', async (req: Request, res: Response) => {
 
     const totalReal = Number(countRow?.total ?? 0)
     const itens = rows.map(r => {
-      const msg  = r.mensagem_whatsapp.replace(/\{nome\}/g, r.cliente_nome.split(' ')[0])
+      const msg  = r.mensagem_whatsapp
+        .replace(/\{nome\}/g, r.cliente_nome.split(' ')[0])
+        .replace(/\{produto\}/g, r.produto_entrada)
       const link = r.cliente_telefone
         ? `https://wa.me/${r.cliente_telefone}?text=${encodeURIComponent(msg)}`
         : null
-      return { ...r, mensagem_do_dia: msg, link_whatsapp: link }
+      return { ...r, mensagem_do_dia: msg, link_whatsapp: link, data_compra_entrada: r.data_compra_entrada ?? null }
     })
 
     res.json({

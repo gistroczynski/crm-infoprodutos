@@ -542,6 +542,7 @@ export interface ItemFluxoAtivo {
   mensagem_do_dia: string
   link_whatsapp: string | null
   status: string
+  data_compra_entrada: string | null
 }
 
 export const fluxoAtivoApi = {

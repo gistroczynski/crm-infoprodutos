@@ -429,14 +429,25 @@ cadenciasRouter.get('/cliente/:clienteId', async (req: Request, res: Response) =
 
 // ── GET /api/cadencias/fluxo-ativo ───────────────────────────────────────
 // Lista do dia filtrada para pipeline ativo — respeitando limite_fluxo_ativo
+// Query params: ?trilha_id=uuid  →  filtra por trilha específica
+//               ?todos=true      →  sem limite de itens
 cadenciasRouter.get('/fluxo-ativo', async (req: Request, res: Response) => {
   try {
-    const semLimite = req.query.sem_limite === 'true'
+    const semLimite = req.query.sem_limite === 'true' || req.query.todos === 'true'
+    const trilhaId  = typeof req.query.trilha_id === 'string' && req.query.trilha_id
+      ? req.query.trilha_id
+      : null
 
     const cfgLimite = await queryOne<{ valor: string }>(
       `SELECT valor FROM configuracoes WHERE chave = 'limite_fluxo_ativo'`
     )
     const limite = Number(cfgLimite?.valor ?? 30)
+
+    // WHERE compartilhado — com filtro opcional por trilha
+    const params: string[] = []
+    const trilhaFilter = trilhaId
+      ? (params.push(trilhaId), `AND ct.trilha_id = $${params.length}`)
+      : ''
 
     const whereFluxo = `
       WHERE ct.status = 'ativo'
@@ -447,9 +458,10 @@ cadenciasRouter.get('/fluxo-ativo', async (req: Request, res: Response) => {
           WHERE co2.cliente_id = ct.cliente_id
             AND co2.status IN ('COMPLETE', 'APPROVED')
         )
+        ${trilhaFilter}
     `
 
-    const [rows, countRow] = await Promise.all([
+    const [rows, countRow, trilhasRow] = await Promise.all([
       query<{
         id: string
         cliente_id: string
@@ -497,13 +509,46 @@ cadenciasRouter.get('/fluxo-ativo', async (req: Request, res: Response) => {
         ${whereFluxo}
         ORDER BY ct.data_proxima_etapa ASC
         ${semLimite ? '' : `LIMIT ${limite}`}
-      `),
+      `, params),
+
       queryOne<{ total: string }>(`
         SELECT COUNT(DISTINCT ct.id)::text AS total
         FROM clientes_trilha ct
         JOIN trilhas_cadencia t ON t.id = ct.trilha_id
                                 AND (t.tipo_pipeline = 'ativo' OR t.tipo_pipeline IS NULL)
         ${whereFluxo}
+      `, params),
+
+      // Trilhas disponíveis com contagem — sem o filtro de trilha_id para listar todas
+      query<{
+        id: string
+        nome: string
+        produto_entrada: string | null
+        produto_destino: string | null
+        total_clientes: number
+      }>(`
+        SELECT
+          t.id,
+          t.nome,
+          pe.nome AS produto_entrada,
+          pd.nome AS produto_destino,
+          COUNT(DISTINCT ct.id)::int AS total_clientes
+        FROM trilhas_cadencia t
+        LEFT JOIN produtos pe ON pe.id = t.produto_entrada_id
+        LEFT JOIN produtos pd ON pd.id = t.produto_destino_id
+        LEFT JOIN clientes_trilha ct ON ct.trilha_id = t.id
+          AND ct.status = 'ativo'
+          AND ct.data_proxima_etapa <= NOW()
+          AND (ct.tipo_pipeline = 'ativo' OR ct.tipo_pipeline IS NULL)
+          AND EXISTS (
+            SELECT 1 FROM compras co2
+            WHERE co2.cliente_id = ct.cliente_id
+              AND co2.status IN ('COMPLETE', 'APPROVED')
+          )
+        WHERE t.ativa = true
+          AND (t.tipo_pipeline = 'ativo' OR t.tipo_pipeline IS NULL)
+        GROUP BY t.id, t.nome, pe.nome, pd.nome
+        ORDER BY total_clientes DESC, t.nome
       `),
     ])
 
@@ -516,7 +561,15 @@ cadenciasRouter.get('/fluxo-ativo', async (req: Request, res: Response) => {
       return { ...r, mensagem_do_dia: msg, link_whatsapp: link }
     })
 
-    res.json({ success: true, total: itens.length, total_real: totalReal, limite, itens })
+    res.json({
+      success: true,
+      trilhas_disponiveis: trilhasRow,
+      total: totalReal,
+      mostrando: itens.length,
+      total_real: totalReal,
+      limite,
+      itens,
+    })
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) })
   }

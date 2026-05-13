@@ -504,6 +504,14 @@ export const cadenciasApi = {
 
 // ── Fluxo Ativo ───────────────────────────────────────────────────────────
 
+export interface TrilhaDisponivel {
+  id: string
+  nome: string
+  produto_entrada: string | null
+  produto_destino: string | null
+  total_clientes: number
+}
+
 export interface ItemFluxoAtivo {
   id: string
   cliente_id: string
@@ -525,11 +533,21 @@ export interface ItemFluxoAtivo {
 }
 
 export const fluxoAtivoApi = {
-  listaDia: (semLimite = false) =>
-    api.get<{ success: boolean; total: number; total_real: number; limite: number; itens: ItemFluxoAtivo[] }>(
-      '/api/cadencias/fluxo-ativo',
-      semLimite ? { params: { sem_limite: 'true' } } : undefined
-    ).then(r => r.data),
+  listaDia: (opts: { semLimite?: boolean; trilhaId?: string } = {}) =>
+    api.get<{
+      success: boolean
+      trilhas_disponiveis: TrilhaDisponivel[]
+      total: number
+      mostrando: number
+      total_real: number
+      limite: number
+      itens: ItemFluxoAtivo[]
+    }>('/api/cadencias/fluxo-ativo', {
+      params: {
+        ...(opts.semLimite  ? { todos: 'true' }          : {}),
+        ...(opts.trilhaId   ? { trilha_id: opts.trilhaId } : {}),
+      },
+    }).then(r => r.data),
 
   avancar: (id: string, status_contato: string, observacao?: string) =>
     api.patch<{ success: boolean; proximo_status: string; data_proxima_etapa: string | null }>(

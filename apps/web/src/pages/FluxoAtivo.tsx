@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { fluxoAtivoApi, type ItemFluxoAtivo } from '../services/api'
+import { fluxoAtivoApi, type ItemFluxoAtivo, type TrilhaDisponivel } from '../services/api'
 import { useToast } from '../hooks/useToast'
 
 
@@ -180,6 +180,20 @@ function CardFluxoAtivo({
   )
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+const LS_KEY = 'fluxo_ativo_trilha_id'
+
+function nomeTrilha(t: TrilhaDisponivel): string {
+  const entrada  = t.produto_entrada ?? t.nome
+  const entradaCurta = entrada.replace(/^(cd|c)\s*[-–]\s*/i, '').substring(0, 28)
+  if (t.produto_destino) {
+    const destino = t.produto_destino.replace(/^(cd|c)\s*[-–]\s*/i, '').substring(0, 20)
+    return `${entradaCurta} → ${destino}`
+  }
+  return entradaCurta
+}
+
 // ── Página principal ──────────────────────────────────────────────────────
 
 type TabEtapa = 'todos' | '1' | '2' | '3+'
@@ -196,23 +210,37 @@ export default function FluxoAtivo() {
   const [busca,              setBusca]              = useState('')
   const [modalPrioridades,   setModalPrioridades]   = useState(false)
   const [atualizandoPrior,   setAtualizandoPrior]   = useState(false)
+  const [trilhasDisponiveis, setTrilhasDisponiveis] = useState<TrilhaDisponivel[]>([])
+  const [trilhaId,           setTrilhaIdState]      = useState<string>(
+    () => localStorage.getItem(LS_KEY) ?? ''
+  )
   const toastRef = useRef(toast)
   toastRef.current = toast
+
+  function setTrilhaId(id: string) {
+    if (id) localStorage.setItem(LS_KEY, id)
+    else    localStorage.removeItem(LS_KEY)
+    setTrilhaIdState(id)
+  }
 
   const carregar = useCallback(async (semLimite = false) => {
     setLoading(true)
     setError(null)
     try {
-      const data = await fluxoAtivoApi.listaDia(semLimite)
+      const data = await fluxoAtivoApi.listaDia({
+        semLimite,
+        trilhaId: trilhaId || undefined,
+      })
       setItens(data.itens)
       setTotalReal(data.total_real)
       setLimite(data.limite)
+      setTrilhasDisponiveis(data.trilhas_disponiveis ?? [])
     } catch {
       setError('Erro ao carregar lista do fluxo ativo.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [trilhaId])
 
   useEffect(() => { carregar(false) }, [carregar])
 
@@ -321,6 +349,30 @@ export default function FluxoAtivo() {
         <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
       )}
 
+      {/* Filtro por funil */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <select
+          value={trilhaId}
+          onChange={e => setTrilhaId(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500 min-w-[220px]"
+        >
+          <option value="">Todos os funis</option>
+          {trilhasDisponiveis.map(t => (
+            <option key={t.id} value={t.id}>
+              {nomeTrilha(t)} ({t.total_clientes})
+            </option>
+          ))}
+        </select>
+        {trilhaId && (
+          <button
+            onClick={() => setTrilhaId('')}
+            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            ✕ Limpar filtro
+          </button>
+        )}
+      </div>
+
       {/* Tabs por etapa */}
       <div className="flex border-b border-gray-200 mb-4">
         {TABS.map(tab => (
@@ -377,7 +429,7 @@ export default function FluxoAtivo() {
             {totalReal > limite && tabEtapa === 'todos' && busca.trim() === '' && (
               <div className="mt-4 flex items-center justify-center gap-3">
                 <span className="text-sm text-gray-400">
-                  Exibindo {Math.min(limite, totalReal)} de {totalReal} contatos disponíveis hoje
+                  Exibindo {itens.length} de {totalReal} contatos disponíveis hoje
                 </span>
                 <button
                   onClick={() => carregar(true)}
